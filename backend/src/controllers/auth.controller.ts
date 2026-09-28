@@ -35,3 +35,22 @@ export const me = async (req: AuthRequest, res: Response) => {
   if (!user) return res.status(404).json({ message: "User not found" });
   return res.json({ user });
 };
+
+export const updateProfile = async (req: AuthRequest, res: Response) => {
+  const user = await User.findByPk(req.userId);
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const { name, targetRole, skills, experienceLevel, studyTime } = req.body;
+  if (name !== undefined) user.name = name;
+  if (targetRole !== undefined) user.targetRole = targetRole;
+  if (skills !== undefined && Array.isArray(skills)) user.skills = skills;
+  if (experienceLevel !== undefined) user.experienceLevel = experienceLevel;
+  if (studyTime !== undefined) user.studyTime = Number(studyTime);
+
+  await user.save();
+  return res.json({
+    message: "Profile updated successfully",
+    user: userResponse(user),
+  });
+};
+

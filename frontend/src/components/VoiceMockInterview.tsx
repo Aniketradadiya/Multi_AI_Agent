@@ -193,6 +193,17 @@ export function VoiceMockInterview() {
         setPastSessions(initialSamples);
         localStorage.setItem("orbit_interview_history", JSON.stringify(initialSamples));
       }
+
+      // Fetch persistent history from backend
+      api
+        .get("/interview/history")
+        .then((res) => {
+          if (Array.isArray(res.data?.history) && res.data.history.length > 0) {
+            setPastSessions(res.data.history);
+            localStorage.setItem("orbit_interview_history", JSON.stringify(res.data.history));
+          }
+        })
+        .catch(() => null);
     } catch (e) {
       console.error(e);
     }
@@ -596,6 +607,9 @@ export function VoiceMockInterview() {
       const updatedHistory = [...pastSessions, newSession];
       setPastSessions(updatedHistory);
       localStorage.setItem("orbit_interview_history", JSON.stringify(updatedHistory));
+
+      // Persist session to backend
+      api.post("/interview/session", newSession).catch(() => null);
     } catch (err) {
       console.error(err);
       alert("Failed to compile complete interview analysis.");

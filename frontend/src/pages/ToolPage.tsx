@@ -37,7 +37,7 @@ export function ToolPage({ tool }: { tool: Tool }) {
         coding: ["/coding/question", { topic: input || "Arrays", difficulty: "Easy" }],
         jobs: ["/jobs/recommendations", null],
         github: ["/github/analyze", { username: input }],
-        progress: ["/dashboard", null]
+        progress: ["/progress", null]
       };
       const [url, body] = requests[tool];
       const response = body ? await api.post(url, body) : await api.get(url);

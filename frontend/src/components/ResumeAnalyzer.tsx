@@ -1,4 +1,4 @@
-import { useState, useRef, type DragEvent, type ChangeEvent } from "react";
+import { useState, useEffect, useRef, type DragEvent, type ChangeEvent } from "react";
 import {
   UploadCloud,
   FileText,
@@ -85,6 +85,19 @@ export function ResumeAnalyzer() {
       return null;
     }
   });
+
+  // Fetch latest analysis from server on mount
+  useEffect(() => {
+    api
+      .get<ResumeAnalysisResult>("/resume/latest")
+      .then((res) => {
+        if (res.data?.atsScore) {
+          setResult(res.data);
+          localStorage.setItem("career_orbit_resume_analysis", JSON.stringify(res.data));
+        }
+      })
+      .catch(() => null);
+  }, []);
   const [chartViewMode, setChartViewMode] = useState<"radar" | "cards">("radar");
   const [activeSectionIndex, setActiveSectionIndex] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);

@@ -79,11 +79,21 @@ export function RoadmapModule() {
         }
       }
 
-      // 2. Check cached roadmap
+      // 2. Check cached roadmap & fetch latest from server
       const cached = localStorage.getItem("career_orbit_roadmap");
       if (cached) {
         setRoadmap(JSON.parse(cached));
       }
+
+      api
+        .get<RoadmapData>("/roadmap")
+        .then((res) => {
+          if (res.data?.phases && res.data.phases.length > 0) {
+            setRoadmap(res.data);
+            localStorage.setItem("career_orbit_roadmap", JSON.stringify(res.data));
+          }
+        })
+        .catch(() => null);
 
       // 3. Check if resume analysis data exists
       const resumeCache = localStorage.getItem("career_orbit_resume_analysis");
@@ -171,6 +181,9 @@ export function RoadmapModule() {
     };
 
     saveRoadmapState(updatedRoadmap);
+
+    // Persist topic toggle to backend
+    api.patch("/roadmap/topic", { phaseId, topicId }).catch(() => null);
   };
 
   // Compute Overall Progress & Counts

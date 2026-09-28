@@ -107,7 +107,7 @@ export function GitHubAnalyzer() {
 
   // 1. Initial load from local cache & user profile
   useEffect(() => {
-    // Check cached github analysis
+    // Check cached github analysis & fetch from server
     try {
       const cached = localStorage.getItem("career_orbit_github_analysis");
       if (cached) {
@@ -117,6 +117,17 @@ export function GitHubAnalyzer() {
           setUsername(parsed.profile.username);
         }
       }
+
+      api
+        .get<GitHubAnalysisData>("/github/latest")
+        .then((res) => {
+          if (res.data?.profile?.username) {
+            setResult(res.data);
+            setUsername(res.data.profile.username);
+            localStorage.setItem("career_orbit_github_analysis", JSON.stringify(res.data));
+          }
+        })
+        .catch(() => null);
     } catch (e) {
       console.warn("Could not load cached github analysis:", e);
     }

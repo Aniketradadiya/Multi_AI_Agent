@@ -2,6 +2,13 @@ import type { Request, Response } from "express";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { env } from "../config/environment.js";
 import { DEFAULT_JOBS, calculateJobMatch, generateAIRecommendation, getSavedJobIds, toggleSavedJob, type JobListing, type JobMatchResult } from "../services/job.service.js";
+import {
+  saveResumeAnalysis,
+  saveGithubAnalysis,
+  saveUserRoadmap,
+  saveInterviewSession,
+  saveCodingSubmission,
+} from "../services/progress.service.js";
 
 export const dashboard = (_req: Request, res: Response) => {
   res.json({ readinessScore: 74, scores: { resume: 78, skills: 72, projects: 85, coding: 65, interviews: 70 }, weeklyGoal: { completed: 3, total: 5 }, streak: 6, nextStep: "Practice Arrays and Strings", recentActivity: ["Resume analyzed", "Completed React roadmap milestone", "Solved Two Sum"] });
@@ -144,11 +151,13 @@ Return ONLY a valid JSON object (no markdown formatting, no code block markers) 
       if (rawText) {
         const cleanedText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
         const parsed = JSON.parse(cleanedText);
+        const userId = (req as AuthRequest).userId;
+        if (userId) saveResumeAnalysis(userId, parsed);
         return res.json(parsed);
       }
     }
 
-    res.json({
+    const fallbackResume = {
       atsScore: 78,
       candidateName: "Candidate",
       fileName: file?.originalname ?? "Sample_Resume.pdf",
@@ -256,7 +265,11 @@ Return ONLY a valid JSON object (no markdown formatting, no code block markers) 
       missingSkills: ["Docker", "AWS / Cloud Infrastructure", "Unit / Integration Testing", "TypeScript"],
       suggestions: ["Lead each project bullet with strong action verbs", "Include concise, high-visibility skills tags", "Quantify project impact with user or performance numbers"],
       recommendedRoles: ["Full Stack Developer", "Frontend Engineer", "Software Engineer Intern"]
-    });
+    };
+
+    const userId = (req as AuthRequest).userId;
+    if (userId) saveResumeAnalysis(userId, fallbackResume);
+    return res.json(fallbackResume);
   } catch (error: any) {
     console.error("Resume analysis error:", error);
     res.status(500).json({
@@ -594,7 +607,7 @@ export const completeInterview = async (req: Request, res: Response) => {
     const avgStructure = Math.round(sumStructure / count);
     const avgProblemSolving = Math.round((avgTechnical + avgStructure) / 2);
 
-    res.json({
+    const reportData = {
       role,
       experience,
       type,
@@ -636,7 +649,22 @@ export const completeInterview = async (req: Request, res: Response) => {
         { title: "Coding Practice", text: "Sharpen algorithmic data structures with curated problems on Arrays and Trees.", link: "/coding" },
         { title: "Resume Polish", text: "Ensure the projects highlighted in this interview are prominently quantified on your resume.", link: "/resume" }
       ]
-    });
+    };
+
+    const userId = (req as AuthRequest).userId;
+    if (userId) {
+      saveInterviewSession(userId, {
+        id: Date.now().toString(),
+        date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        role,
+        type,
+        score: avgOverall,
+        questionsCount: count,
+        report: reportData,
+      });
+    }
+
+    return res.json(reportData);
   } catch (error: any) {
     console.error("completeInterview error:", error);
     res.status(500).json({ message: "Failed to complete interview", error: error?.message });
@@ -743,6 +771,8 @@ Return ONLY a valid JSON object with NO Markdown and NO backticks:
                 const cleaned = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
                 const parsed = JSON.parse(cleaned);
                 if (parsed && Array.isArray(parsed.phases) && parsed.phases.length > 0) {
+                  const userId = (req as AuthRequest).userId;
+                  if (userId) saveUserRoadmap(userId, parsed);
                   return res.json(parsed);
                 }
               }
@@ -926,6 +956,8 @@ Return ONLY a valid JSON object with NO Markdown and NO backticks:
       };
     }
 
+    const userId = (req as AuthRequest).userId;
+    if (userId) saveUserRoadmap(userId, fallbackData);
     res.json(fallbackData);
   } catch (error: any) {
     console.error("roadmap error:", error);
@@ -1171,7 +1203,7 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
       const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleaned);
       if (parsed && typeof parsed.score === "number") {
-        return res.json({
+        const evalResult = {
           score: Math.min(100, Math.max(0, Math.round(parsed.score))),
           passed: Boolean(parsed.passed ?? parsed.score >= 60),
           correctness: Math.min(100, Math.max(0, Math.round(parsed.correctness ?? parsed.score))),
@@ -1183,7 +1215,23 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
             ? parsed.observations
             : ["✓ Solution structure looks solid", "✓ Clean syntax and variable naming", "⚠ Consider potential edge cases"],
           feedback: parsed.feedback || "Good effort! Check time complexity and edge case handling."
-        });
+        };
+
+        const userId = (req as AuthRequest).userId;
+        if (userId) {
+          saveCodingSubmission(userId, {
+            id: Date.now().toString(),
+            title: String(req.body.title || "Coding Challenge"),
+            topic: String(req.body.topic || "Algorithms"),
+            difficulty: String(req.body.difficulty || "Easy"),
+            language: String(req.body.language || "JavaScript"),
+            score: evalResult.score,
+            passed: evalResult.passed,
+            timestamp: "Just now",
+          });
+        }
+
+        return res.json(evalResult);
       }
     }
   } catch (err) {
@@ -1201,7 +1249,7 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
   if (code.length > 60) score += 6;
   score = Math.min(95, Math.max(35, score));
 
-  return res.json({
+  const fallbackEval = {
     score,
     passed: score >= 60,
     correctness: score >= 60 ? 85 : 45,
@@ -1217,7 +1265,23 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
     feedback: score >= 60
       ? "Your approach is correct and logical. Keep practicing optimal patterns."
       : "Ensure your function returns the correct value and handles edge conditions."
-  });
+  };
+
+  const userId = (req as AuthRequest).userId;
+  if (userId) {
+    saveCodingSubmission(userId, {
+      id: Date.now().toString(),
+      title: String(req.body.title || "Coding Challenge"),
+      topic: String(req.body.topic || "Algorithms"),
+      difficulty: String(req.body.difficulty || "Easy"),
+      language: String(req.body.language || "JavaScript"),
+      score: fallbackEval.score,
+      passed: fallbackEval.passed,
+      timestamp: "Just now",
+    });
+  }
+
+  return res.json(fallbackEval);
 };
 
 export const codingHint = async (req: Request, res: Response) => {
@@ -1844,7 +1908,7 @@ Instructions:
       };
     });
 
-    return res.json({
+    const githubResult = {
       profile: profileSummary,
       portfolioScore,
       skills: detectedSkills,
@@ -1853,7 +1917,11 @@ Instructions:
       checklist,
       repositories: enrichedRepos,
       analyzedAt: new Date().toISOString(),
-    });
+    };
+
+    const userId = (req as AuthRequest).userId;
+    if (userId) saveGithubAnalysis(userId, githubResult);
+    return res.json(githubResult);
   } catch (error: any) {
     console.error("GitHub Analysis Error:", error);
     return res.status(500).json({

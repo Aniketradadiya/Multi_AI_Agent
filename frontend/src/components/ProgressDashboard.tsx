@@ -19,11 +19,13 @@ import {
   Bookmark,
   Activity,
 } from "lucide-react";
+import { api } from "../services/api";
 
 export function ProgressDashboard() {
   const navigate = useNavigate();
 
-  // State loaded from existing real user modules
+  // State loaded from backend API & existing local storage cache
+  const [serverProgress, setServerProgress] = useState<any>(null);
   const [resumeData, setResumeData] = useState<any>(null);
   const [roadmapData, setRoadmapData] = useState<any>(null);
   const [codingHistory, setCodingHistory] = useState<any[]>([]);
@@ -33,65 +35,116 @@ export function ProgressDashboard() {
   const [userProfile, setUserProfile] = useState<any>(null);
 
   useEffect(() => {
-    // 1. Resume data
+    // 1. Initial local state retrieval for instant rendering
+    let localResume: any = null;
+    let localRoadmap: any = null;
+    let localCoding: any[] = [];
+    let localInterview: any[] = [];
+    let localJobs: string[] = [];
+    let localGithub: any = null;
+
     try {
       const resRaw = localStorage.getItem("career_orbit_resume_analysis");
-      if (resRaw) setResumeData(JSON.parse(resRaw));
+      if (resRaw) {
+        localResume = JSON.parse(resRaw);
+        setResumeData(localResume);
+      }
     } catch (e) {
       console.warn("Could not read resume analysis:", e);
     }
 
-    // 2. Roadmap data
     try {
       const rmRaw = localStorage.getItem("career_orbit_roadmap");
-      if (rmRaw) setRoadmapData(JSON.parse(rmRaw));
+      if (rmRaw) {
+        localRoadmap = JSON.parse(rmRaw);
+        setRoadmapData(localRoadmap);
+      }
     } catch (e) {
       console.warn("Could not read roadmap data:", e);
     }
 
-    // 3. Coding history
     try {
       const chRaw = localStorage.getItem("career_orbit_coding_history");
-      if (chRaw) setCodingHistory(JSON.parse(chRaw));
+      if (chRaw) {
+        localCoding = JSON.parse(chRaw);
+        setCodingHistory(localCoding);
+      }
     } catch (e) {
       console.warn("Could not read coding history:", e);
     }
 
-    // 4. Interview history
     try {
       const ihRaw = localStorage.getItem("orbit_interview_history");
-      if (ihRaw) setInterviewHistory(JSON.parse(ihRaw));
+      if (ihRaw) {
+        localInterview = JSON.parse(ihRaw);
+        setInterviewHistory(localInterview);
+      }
     } catch (e) {
       console.warn("Could not read interview history:", e);
     }
 
-    // 5. Saved jobs
     try {
       const sjRaw = localStorage.getItem("career_orbit_saved_jobs");
-      if (sjRaw) setSavedJobs(JSON.parse(sjRaw));
+      if (sjRaw) {
+        localJobs = JSON.parse(sjRaw);
+        setSavedJobs(localJobs);
+      }
     } catch (e) {
       console.warn("Could not read saved jobs:", e);
     }
 
-    // 6. GitHub analysis
     try {
       const ghRaw = localStorage.getItem("career_orbit_github_analysis");
-      if (ghRaw) setGithubData(JSON.parse(ghRaw));
+      if (ghRaw) {
+        localGithub = JSON.parse(ghRaw);
+        setGithubData(localGithub);
+      }
     } catch (e) {
       console.warn("Could not read github analysis:", e);
     }
 
-    // 7. User profile
     try {
       const uRaw = localStorage.getItem("user");
       if (uRaw) setUserProfile(JSON.parse(uRaw));
     } catch (e) {
       console.warn("Could not read user profile:", e);
     }
+
+    // 2. Fetch Aggregated Progress from backend API
+    api
+      .get("/progress")
+      .then((res) => {
+        if (res.data) {
+          setServerProgress(res.data);
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not fetch progress from API:", err);
+      });
+
+    // 3. Sync local data with server store to persist activity
+    const syncPayload: any = {};
+    if (localResume) syncPayload.resumeAnalysis = localResume;
+    if (localRoadmap) syncPayload.roadmap = localRoadmap;
+    if (localCoding.length > 0) syncPayload.codingHistory = localCoding;
+    if (localInterview.length > 0) syncPayload.interviewHistory = localInterview;
+    if (localGithub) syncPayload.githubAnalysis = localGithub;
+
+    if (Object.keys(syncPayload).length > 0) {
+      api
+        .post("/progress/sync", syncPayload)
+        .then((res) => {
+          if (res.data?.progress) {
+            setServerProgress(res.data.progress);
+          }
+        })
+        .catch(() => null);
+    }
   }, []);
 
   // Compute Learning Activity statistics
   const stats = useMemo(() => {
+    if (serverProgress?.stats) return serverProgress.stats;
     // Questions solved (count of entries in coding history)
     const questionsSolved = codingHistory.length;
 
@@ -130,6 +183,7 @@ export function ProgressDashboard() {
 
   // Compute Module Progress Percentages (0% if no data yet)
   const moduleProgress = useMemo(() => {
+    if (serverProgress?.moduleProgress) return serverProgress.moduleProgress;
     // Resume Analyzer: atsScore if available, else 0%
     const resumeScore = resumeData?.atsScore ? Math.round(Number(resumeData.atsScore)) : 0;
 
@@ -180,6 +234,7 @@ export function ProgressDashboard() {
 
   // Compute Breakdown Scores & Overall Progress
   const scoresBreakdown = useMemo(() => {
+    if (serverProgress?.scoresBreakdown) return serverProgress.scoresBreakdown;
     // Skills: derived from resume + roadmap + github
     const activeSkillScores: number[] = [];
     if (moduleProgress.resume > 0) activeSkillScores.push(moduleProgress.resume);
@@ -233,6 +288,7 @@ export function ProgressDashboard() {
 
   // Weekly Activity (Monday through Sunday)
   const weeklyActivity = useMemo(() => {
+    if (serverProgress?.weeklyActivity) return serverProgress.weeklyActivity;
     // Days of current week
     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
     
@@ -260,6 +316,9 @@ export function ProgressDashboard() {
 
   // Recent Activity Feed
   const recentActivities = useMemo(() => {
+    if (serverProgress?.recentActivities && serverProgress.recentActivities.length > 0) {
+      return serverProgress.recentActivities;
+    }
     const list: { title: string; date: string; type: string }[] = [];
 
     // 1. Coding activity
@@ -324,6 +383,7 @@ export function ProgressDashboard() {
 
   // Dynamic AI Progress Recommendation based on real metrics
   const aiRecommendation = useMemo(() => {
+    if (serverProgress?.aiRecommendation) return serverProgress.aiRecommendation;
     const { resume, coding, interview, github, roadmap } = moduleProgress;
 
     // Identify lowest active or neglected areas
@@ -649,7 +709,7 @@ export function ProgressDashboard() {
           </div>
 
           <div className="weekly-days-list">
-            {weeklyActivity.map(item => (
+            {weeklyActivity.map((item: any) => (
               <div key={item.day} className={`weekly-day-row ${item.active ? "day-active" : "day-inactive"}`}>
                 <span className="day-name">{item.day}</span>
                 <span className="day-status-pill">
@@ -678,7 +738,7 @@ export function ProgressDashboard() {
           </div>
 
           <div className="recent-activity-stream">
-            {recentActivities.map((act, i) => (
+            {recentActivities.map((act: any, i: number) => (
               <div key={i} className="activity-stream-item">
                 <span className="stream-check-icon">
                   <CheckCircle2 size={15} />

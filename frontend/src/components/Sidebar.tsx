@@ -49,6 +49,35 @@ export function Sidebar() {
     }
   });
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editRole, setEditRole] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  const handleStartEdit = () => {
+    setEditName(user?.name || "");
+    setEditRole(user?.targetRole || "Software Developer");
+    setIsEditing(true);
+  };
+
+  const handleSaveProfile = async () => {
+    setSavingProfile(true);
+    try {
+      const res = await api.put("/auth/profile", {
+        name: editName,
+        targetRole: editRole,
+      });
+      if (res.data?.user) {
+        setUser(res.data.user);
+        localStorage.setItem("user", JSON.stringify(res.data.user));
+      }
+      setIsEditing(false);
+    } catch (e) {
+      console.error("Save profile error:", e);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   useEffect(() => {
     // Fetch latest user profile from backend
@@ -143,9 +172,26 @@ export function Sidebar() {
                   <div className="field-icon">
                     <UserIcon size={16} />
                   </div>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <span className="field-label">Full Name</span>
-                    <span className="field-value">{user?.name || "Not specified"}</span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.15)",
+                          borderRadius: "6px",
+                          padding: "4px 8px",
+                          color: "#fff",
+                          width: "100%",
+                          marginTop: "2px",
+                        }}
+                      />
+                    ) : (
+                      <span className="field-value">{user?.name || "Not specified"}</span>
+                    )}
                   </div>
                 </div>
 
@@ -163,9 +209,26 @@ export function Sidebar() {
                   <div className="field-icon">
                     <Award size={16} />
                   </div>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <span className="field-label">Target Role</span>
-                    <span className="field-value">{user?.targetRole || "Software Developer"}</span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.15)",
+                          borderRadius: "6px",
+                          padding: "4px 8px",
+                          color: "#fff",
+                          width: "100%",
+                          marginTop: "2px",
+                        }}
+                      />
+                    ) : (
+                      <span className="field-value">{user?.targetRole || "Software Developer"}</span>
+                    )}
                   </div>
                 </div>
 
@@ -195,19 +258,48 @@ export function Sidebar() {
             </div>
 
             <div className="profile-modal-footer">
-              <button
-                className="modal-logout-btn"
-                onClick={handleLogout}
-              >
-                <LogOut size={16} />
-                Log out
-              </button>
-              <button
-                className="modal-dismiss-btn"
-                onClick={() => setShowProfileModal(false)}
-              >
-                Close
-              </button>
+              {isEditing ? (
+                <>
+                  <button
+                    className="modal-dismiss-btn"
+                    onClick={() => setIsEditing(false)}
+                    disabled={savingProfile}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="modal-logout-btn"
+                    style={{ background: "#10b981", borderColor: "#10b981", color: "#fff" }}
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile}
+                  >
+                    {savingProfile ? "Saving..." : "Save Profile"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="modal-logout-btn"
+                    onClick={handleLogout}
+                  >
+                    <LogOut size={16} />
+                    Log out
+                  </button>
+                  <button
+                    className="modal-dismiss-btn"
+                    style={{ marginRight: "auto" }}
+                    onClick={handleStartEdit}
+                  >
+                    Edit Profile
+                  </button>
+                  <button
+                    className="modal-dismiss-btn"
+                    onClick={() => setShowProfileModal(false)}
+                  >
+                    Close
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

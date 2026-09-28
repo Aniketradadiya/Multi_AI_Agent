@@ -159,6 +159,19 @@ export function CodingPractice() {
     }
   });
 
+  // Fetch coding history from server
+  useEffect(() => {
+    api
+      .get("/coding/history")
+      .then((res) => {
+        if (Array.isArray(res.data?.history) && res.data.history.length > 0) {
+          setHistory(res.data.history);
+          localStorage.setItem("career_orbit_coding_history", JSON.stringify(res.data.history));
+        }
+      })
+      .catch(() => null);
+  }, []);
+
   // Roadmap Connection State
   const [roadmapFocus, setRoadmapFocus] = useState<{
     focus: string;
@@ -365,6 +378,7 @@ export function CodingPractice() {
           timestamp: "Just now",
         };
         setHistory((prev) => [newRecord, ...prev]);
+        api.post("/coding/history", newRecord).catch(() => null);
       }
     } catch (err: any) {
       console.error("Submission evaluation failed:", err);

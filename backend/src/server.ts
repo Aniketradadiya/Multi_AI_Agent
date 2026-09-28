@@ -6,7 +6,8 @@ import { authRouter } from "./routes/auth.routes.js";
 import { careerRouter } from "./routes/career.routes.js";
 
 const app = express();
-app.use(cors({ origin: env.clientUrl }));
+app.use(cors({ origin: "*" }));
+
 app.use(express.json({ limit: "1mb" }));
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRouter);
