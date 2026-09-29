@@ -2,6 +2,7 @@ import type { Response } from "express";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import {
   getFullUserProgress,
+  hydrateUserStoreFromDb,
   getCodingHistory,
   saveCodingSubmission,
   CODING_TOPICS,
@@ -23,15 +24,17 @@ import {
 import { DEFAULT_JOBS } from "../services/job.service.js";
 
 // GET /api/progress
-export const getProgress = (req: AuthRequest, res: Response) => {
+export const getProgress = async (req: AuthRequest, res: Response) => {
   const userId = req.userId || "anonymous";
+  await hydrateUserStoreFromDb(userId);
   const progress = getFullUserProgress(userId);
   return res.json(progress);
 };
 
 // GET /api/dashboard
-export const dashboard = (req: AuthRequest, res: Response) => {
+export const dashboard = async (req: AuthRequest, res: Response) => {
   const userId = req.userId || "anonymous";
+  await hydrateUserStoreFromDb(userId);
   const progress = getFullUserProgress(userId);
   return res.json({
     readinessScore: progress.readinessScore,

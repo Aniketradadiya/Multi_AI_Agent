@@ -23,6 +23,7 @@ interface UserProfile {
   id?: string;
   name: string;
   email: string;
+  role?: string;
   targetRole?: string;
   skills?: string[];
 }
@@ -38,7 +39,12 @@ const links = [
   { to: "/progress", label: "Progress", icon: BarChart3 },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
@@ -53,6 +59,21 @@ export function Sidebar() {
   const [editName, setEditName] = useState("");
   const [editRole, setEditRole] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // Close mobile drawer / modal on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showProfileModal) {
+          setShowProfileModal(false);
+        } else if (mobileOpen && onClose) {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen, onClose, showProfileModal]);
 
   const handleStartEdit = () => {
     setEditName(user?.name || "");
@@ -110,36 +131,93 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="sidebar">
-      <NavLink to="/dashboard" className="brand">
-        <Target size={24} /> Career Orbit
-      </NavLink>
+    <>
+      {/* Mobile Drawer Backdrop */}
+      <div
+        className={`sidebar-backdrop ${mobileOpen ? "visible" : ""}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
-      <nav>
-        {links.map(({ to, label, icon: Icon }) => (
-          <NavLink key={to} to={to} className="nav-link">
-            <Icon size={18} />
-            {label}
+      <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+        <div className="sidebar-header">
+          <NavLink
+            to="/dashboard"
+            className="brand"
+            onClick={() => {
+              if (onClose) onClose();
+            }}
+          >
+            <Target size={24} /> Career Orbit
           </NavLink>
-        ))}
-      </nav>
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Close menu"
+          >
+            <X size={20} />
+          </button>
+        </div>
 
-      <div className="sidebar-bottom">
-        {/* User Profile Card */}
-        <div
-          className="sidebar-user-card"
-          onClick={() => setShowProfileModal(true)}
-          title="View Profile Details & Log out"
-        >
-          <div className="user-avatar-circle">
-            {getInitials(user?.name)}
-          </div>
-          <div className="user-info-text">
-            <span className="user-name">{user?.name || "Career Seeker"}</span>
-            <span className="user-role">{user?.targetRole || user?.email || "Student / Developer"}</span>
+        <nav>
+          {links.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className="nav-link"
+              onClick={() => {
+                if (onClose) onClose();
+              }}
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="sidebar-bottom">
+          {user?.role === "ADMIN" && (
+            <NavLink
+              to="/admin"
+              className="admin-switch-btn"
+              onClick={onClose}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                background: "rgba(16, 185, 129, 0.12)",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+                color: "#34d399",
+                fontSize: "12.5px",
+                fontWeight: 650,
+                textDecoration: "none",
+                marginBottom: "4px",
+              }}
+            >
+              <ShieldCheck size={16} />
+              <span>Admin Dashboard</span>
+            </NavLink>
+          )}
+
+          {/* User Profile Card */}
+          <div
+            className="sidebar-user-card"
+            onClick={() => setShowProfileModal(true)}
+            title="View Profile Details & Log out"
+          >
+            <div className="user-avatar-circle">
+              {getInitials(user?.name)}
+            </div>
+            <div className="user-info-text">
+              <span className="user-name">{user?.name || "Career Seeker"}</span>
+              <span className="user-role">{user?.targetRole || user?.email || "Student / Developer"}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </aside>
 
       {/* Profile Details Modal */}
       {showProfileModal && (
@@ -304,6 +382,7 @@ export function Sidebar() {
           </div>
         </div>
       )}
-    </aside>
+    </>
   );
 }
+

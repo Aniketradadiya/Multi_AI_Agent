@@ -1,4 +1,10 @@
 import { getSavedJobIds } from "./job.service.js";
+import { ResumeAnalysis } from "../models/ResumeAnalysis.js";
+import { Roadmap } from "../models/Roadmap.js";
+import { CodingAttempt } from "../models/CodingAttempt.js";
+import { InterviewSessionModel } from "../models/InterviewSession.js";
+import { GithubAnalysisModel } from "../models/GithubAnalysis.js";
+import { JobActivity } from "../models/JobActivity.js";
 
 export interface PracticeRecord {
   id: string;
@@ -75,9 +81,64 @@ function getOrCreateUserStore(userId: string): UserStoreData {
       codingHistory: [],
       interviewHistory: [],
       activeDates: new Set<string>(),
-      weeklyGoal: { completed: 3, total: 5 },
+      weeklyGoal: { completed: 0, total: 5 },
     };
     progressCache.set(userId, store);
+  }
+  return store;
+}
+
+export async function hydrateUserStoreFromDb(userId: string): Promise<UserStoreData> {
+  const store = getOrCreateUserStore(userId);
+  try {
+    if (!store.resumeAnalysis) {
+      const resume = await ResumeAnalysis.findOne({ where: { userId }, order: [["created_at", "DESC"]] });
+      if (resume) store.resumeAnalysis = resume.toJSON();
+    }
+
+    if (!store.roadmap) {
+      const rm = await Roadmap.findOne({ where: { userId }, order: [["updated_at", "DESC"]] });
+      if (rm) store.roadmap = rm.toJSON() as any;
+    }
+
+    if (store.codingHistory.length === 0) {
+      const coding = await CodingAttempt.findAll({ where: { userId }, order: [["created_at", "DESC"]] });
+      if (coding.length > 0) {
+        store.codingHistory = coding.map((c) => ({
+          id: c.id,
+          title: c.problemTitle,
+          topic: c.topic,
+          difficulty: c.difficulty as any,
+          language: c.language,
+          score: c.score,
+          passed: c.passed,
+          timestamp: new Date(c.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          code: c.code,
+        }));
+      }
+    }
+
+    if (store.interviewHistory.length === 0) {
+      const interviews = await InterviewSessionModel.findAll({ where: { userId }, order: [["created_at", "DESC"]] });
+      if (interviews.length > 0) {
+        store.interviewHistory = interviews.map((i) => ({
+          id: i.id,
+          date: new Date(i.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          role: i.role,
+          type: i.interviewType,
+          score: i.score,
+          questionsCount: i.questionsCount,
+          report: i.report,
+        }));
+      }
+    }
+
+    if (!store.githubAnalysis) {
+      const gh = await GithubAnalysisModel.findOne({ where: { userId }, order: [["created_at", "DESC"]] });
+      if (gh) store.githubAnalysis = gh.toJSON();
+    }
+  } catch (err) {
+    console.warn("[ProgressService] hydrateUserStoreFromDb error:", err);
   }
   return store;
 }
@@ -85,6 +146,14 @@ function getOrCreateUserStore(userId: string): UserStoreData {
 function recordUserActivityDate(store: UserStoreData) {
   const todayStr = new Date().toISOString().slice(0, 10);
   store.activeDates.add(todayStr);
+}
+
+export function getAllUserStores(): UserStoreData[] {
+  return Array.from(progressCache.values());
+}
+
+export function getUserStoreData(userId: string): UserStoreData {
+  return getOrCreateUserStore(userId);
 }
 
 // --- Coding Practice History ---
@@ -103,6 +172,20 @@ export function saveCodingSubmission(userId: string, record: PracticeRecord): Pr
   } else {
     store.codingHistory.unshift(record);
   }
+
+  // Persist to PostgreSQL
+  CodingAttempt.create({
+    userId,
+    problemTitle: record.title || "Coding Challenge",
+    topic: record.topic || "Algorithms",
+    difficulty: record.difficulty || "Easy",
+    language: record.language || "JavaScript",
+    score: record.score || 80,
+    passed: record.passed ?? true,
+    code: record.code || "",
+    feedback: "",
+  }).catch((err) => console.warn("[ProgressService] DB save coding attempt failed:", err));
+
   return record;
 }
 
@@ -136,6 +219,17 @@ export function saveInterviewSession(userId: string, session: InterviewSession):
   } else {
     store.interviewHistory.unshift(session);
   }
+
+  // Persist to PostgreSQL
+  InterviewSessionModel.create({
+    userId,
+    role: session.role || "Software Developer",
+    interviewType: session.type || "Mixed",
+    score: session.score || 75,
+    questionsCount: session.questionsCount || 5,
+    report: session.report || null,
+  }).catch((err) => console.warn("[ProgressService] DB save interview session failed:", err));
+
   return session;
 }
 
@@ -158,6 +252,21 @@ export function saveUserRoadmap(userId: string, roadmap: UserRoadmap): UserRoadm
     ...roadmap,
     updatedAt: new Date().toISOString(),
   };
+
+  // Persist to PostgreSQL
+  Roadmap.create({
+    userId,
+    title: roadmap.title || "Career Roadmap",
+    targetRole: roadmap.targetRole || "Software Developer",
+    skillLevel: roadmap.skillLevel || "Beginner",
+    studyTime: typeof roadmap.studyTime === "string" ? roadmap.studyTime : "1 hour",
+    goal: roadmap.goal || "Job",
+    currentFocus: roadmap.currentFocus || "Fundamentals",
+    currentFocusReason: roadmap.currentFocusReason || "",
+    aiRecommendation: roadmap.aiRecommendation || "",
+    phases: roadmap.phases || [],
+  }).catch((err) => console.warn("[ProgressService] DB save roadmap failed:", err));
+
   return store.roadmap;
 }
 
@@ -221,6 +330,25 @@ export function saveResumeAnalysis(userId: string, analysis: any): any {
   const store = getOrCreateUserStore(userId);
   recordUserActivityDate(store);
   store.resumeAnalysis = analysis;
+
+  // Persist to PostgreSQL
+  ResumeAnalysis.create({
+    userId,
+    atsScore: analysis.atsScore || 70,
+    candidateName: analysis.candidateName || "Candidate",
+    fileName: analysis.fileName || "Resume.pdf",
+    summary: analysis.summary,
+    categoryScores: analysis.categoryScores,
+    changesRequired: analysis.changesRequired,
+    jobMatch: analysis.jobMatch,
+    sectionAnalysis: analysis.sectionAnalysis,
+    strengths: analysis.strengths || [],
+    weaknesses: analysis.weaknesses || [],
+    missingSkills: analysis.missingSkills || [],
+    suggestions: analysis.suggestions || [],
+    recommendedRoles: analysis.recommendedRoles || [],
+  }).catch((err) => console.warn("[ProgressService] DB save resume analysis failed:", err));
+
   return analysis;
 }
 
@@ -235,6 +363,20 @@ export function saveGithubAnalysis(userId: string, analysis: any): any {
   const store = getOrCreateUserStore(userId);
   recordUserActivityDate(store);
   store.githubAnalysis = analysis;
+
+  // Persist to PostgreSQL
+  GithubAnalysisModel.create({
+    userId,
+    username: analysis.profile?.username || "developer",
+    overallScore: analysis.portfolioScore?.overall || 75,
+    portfolioScore: analysis.portfolioScore,
+    skills: analysis.skills || [],
+    recommendations: analysis.recommendations || [],
+    checklist: analysis.checklist || [],
+    repositories: analysis.repositories || [],
+    profile: analysis.profile,
+  }).catch((err) => console.warn("[ProgressService] DB save github analysis failed:", err));
+
   return analysis;
 }
 
@@ -469,8 +611,7 @@ export function getFullUserProgress(userId: string) {
 
   if (recentActivities.length === 0) {
     recentActivities.push(
-      { title: "Account created and profile initialized", date: "Today", type: "system" },
-      { title: "Explore Career Orbit modules to generate your real progress metrics", date: "Today", type: "system" }
+      { title: "No activity yet", date: "Today", type: "system" }
     );
   }
 
@@ -483,7 +624,9 @@ export function getFullUserProgress(userId: string) {
   if (moduleProgress.roadmap === 0) suggestions.push("start your AI Career Roadmap milestones");
 
   let aiRecommendation: string;
-  if (suggestions.length === 0) {
+  if (!hasAnyActivity) {
+    aiRecommendation = "Welcome to Career Orbit! Start by analyzing your resume or setting up your AI Career Roadmap to build your readiness metrics.";
+  } else if (suggestions.length === 0) {
     aiRecommendation = "You are making excellent progress across all modules. Keep maintaining consistency in coding practice and mock interviews this week.";
   } else if (suggestions.length === 1) {
     aiRecommendation = `You are making solid progress. Focus on ${suggestions[0]} this week to further elevate your career readiness.`;
@@ -500,25 +643,28 @@ export function getFullUserProgress(userId: string) {
   else if (moduleProgress.github === 0) nextStep = "Audit your GitHub portfolio repositories";
 
   return {
-    readinessScore: readinessScore || 72,
+    readinessScore: readinessScore,
     overallProgress,
     moduleProgress,
     scoresBreakdown,
     scores: {
-      resume: scoresBreakdown.resume || 75,
-      skills: scoresBreakdown.skills || 70,
-      projects: scoresBreakdown.projects || 78,
-      coding: scoresBreakdown.coding || 65,
-      interviews: scoresBreakdown.interview || 70,
+      resume: scoresBreakdown.resume,
+      skills: scoresBreakdown.skills,
+      projects: scoresBreakdown.projects,
+      coding: scoresBreakdown.coding,
+      interview: scoresBreakdown.interview,
+      interviews: scoresBreakdown.interview,
+      roadmap: moduleProgress.roadmap,
+      github: moduleProgress.github,
     },
     stats,
     weeklyActivity,
     weeklyGoal: store.weeklyGoal,
-    streak: Math.max(1, streak),
+    streak: streak,
     recentActivities: recentActivities.slice(0, 5),
     recentActivity: recentActivities.slice(0, 4).map((a) => a.title),
     aiRecommendation,
-    nextStep,
+    nextStep: hasAnyActivity ? nextStep : "Explore Career Orbit modules to start your progress",
     targetRole: store.roadmap?.targetRole || "Software Developer",
   };
 }

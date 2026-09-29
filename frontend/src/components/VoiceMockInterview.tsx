@@ -181,24 +181,21 @@ export function VoiceMockInterview() {
     try {
       const stored = localStorage.getItem("orbit_interview_history");
       if (stored) {
-        setPastSessions(JSON.parse(stored));
-      } else {
-        // Initial sample historical progression
-        const initialSamples: SavedInterviewSession[] = [
-          { id: "1", date: "Aug 28", role: "Frontend Developer", type: "Technical", score: 64, questionsCount: 5 },
-          { id: "2", date: "Sep 03", role: "MERN Developer", type: "Mixed", score: 68, questionsCount: 5 },
-          { id: "3", date: "Sep 08", role: "MERN Stack Developer", type: "Technical", score: 72, questionsCount: 5 },
-          { id: "4", date: "Sep 12", role: "Full Stack Developer", type: "Mixed", score: 78, questionsCount: 5 },
-        ];
-        setPastSessions(initialSamples);
-        localStorage.setItem("orbit_interview_history", JSON.stringify(initialSamples));
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPastSessions(parsed);
+          }
+        } catch {
+          // ignore
+        }
       }
 
       // Fetch persistent history from backend
       api
         .get("/interview/history")
         .then((res) => {
-          if (Array.isArray(res.data?.history) && res.data.history.length > 0) {
+          if (Array.isArray(res.data?.history)) {
             setPastSessions(res.data.history);
             localStorage.setItem("orbit_interview_history", JSON.stringify(res.data.history));
           }
@@ -893,7 +890,7 @@ export function VoiceMockInterview() {
                 </div>
                 <div className="history-score-chip">
                   Latest Score:{" "}
-                  <strong>{pastSessions[pastSessions.length - 1]?.score || 78}/100</strong>
+                  <strong>{pastSessions[pastSessions.length - 1]?.score ?? 0}/100</strong>
                 </div>
               </div>
 

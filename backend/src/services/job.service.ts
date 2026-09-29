@@ -271,11 +271,29 @@ export function toggleSavedJob(userId: string, jobId: string): { isSaved: boolea
     userSavedJobsStore.set(userId, userSet);
   }
 
-  if (userSet.has(jobId)) {
+  const isCurrentlySaved = userSet.has(jobId);
+  if (isCurrentlySaved) {
     userSet.delete(jobId);
+    // Asynchronously update PostgreSQL
+    import("../models/JobActivity.js").then(({ JobActivity }) => {
+      JobActivity.update({ isSaved: false }, { where: { userId, jobId } }).catch(() => null);
+    });
     return { isSaved: false, savedJobIds: Array.from(userSet) };
   } else {
     userSet.add(jobId);
+    // Asynchronously update PostgreSQL
+    import("../models/JobActivity.js").then(({ JobActivity }) => {
+      const jobItem = DEFAULT_JOBS.find(j => j.id === jobId);
+      JobActivity.create({
+        userId,
+        jobId,
+        role: jobItem?.title || "Job",
+        company: jobItem?.company || "Company",
+        location: jobItem?.location || "Location",
+        isSaved: true,
+        details: jobItem || null,
+      }).catch(() => null);
+    });
     return { isSaved: true, savedJobIds: Array.from(userSet) };
   }
 }
@@ -302,8 +320,8 @@ export async function generateAIRecommendation(
 
   // If Gemini API Key is present, request a concise recommendation
   if (env.geminiApiKey) {
-    try {
-      const prompt = `You are a Career Coach AI for the Career Orbit platform.
+    const models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-flash-latest"];
+    const prompt = `You are a Career Coach AI for the Career Orbit platform.
 A student/developer has skills: [${userSkills.join(", ")}].
 Target Role: "${targetRole || "Software Developer"}".
 Top matched jobs have common missing skills: [${topMissing.join(", ")}].
@@ -311,26 +329,29 @@ Generate exactly 1-2 concise, encouraging sentences advising what skills to impr
 Example: "These jobs match your current skills. Improve Docker and AWS to increase the number of matching backend/full-stack roles."
 Do not use bullet points or markdown headings. Keep it under 35 words.`;
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.geminiApiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        }
-      );
+    for (const model of models) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.geminiApiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }]
+            })
+          }
+        );
 
-      if (response.ok) {
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (text) {
-          return text.replace(/^"|"$/g, "").trim();
+        if (response.ok) {
+          const data = await response.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (text) {
+            return text.replace(/^"|"$/g, "").trim();
+          }
         }
+      } catch (err) {
+        console.warn(`Gemini recommendation fallback with ${model}:`, err);
       }
-    } catch (err) {
-      console.warn("Gemini recommendation fallback triggered:", err);
     }
   }
 

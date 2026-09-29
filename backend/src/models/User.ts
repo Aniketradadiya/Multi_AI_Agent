@@ -6,6 +6,8 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare name: string;
   declare email: string;
   declare password: string;
+  declare role: CreationOptional<"USER" | "ADMIN">;
+  declare status: CreationOptional<"active" | "disabled">;
   declare targetRole: CreationOptional<string>;
   declare experienceLevel: CreationOptional<string>;
   declare skills: CreationOptional<string[]>;
@@ -19,6 +21,8 @@ User.init({
   name: { type: DataTypes.STRING, allowNull: false },
   email: { type: DataTypes.STRING, allowNull: false, unique: true, validate: { isEmail: true } },
   password: { type: DataTypes.STRING, allowNull: false },
+  role: { type: DataTypes.STRING, allowNull: false, defaultValue: "USER" },
+  status: { type: DataTypes.STRING, allowNull: false, defaultValue: "active" },
   targetRole: { type: DataTypes.STRING, allowNull: false, defaultValue: "Software Developer", field: "target_role" },
   experienceLevel: { type: DataTypes.STRING, allowNull: false, defaultValue: "Student", field: "experience_level" },
   skills: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },

@@ -9,275 +9,58 @@ import {
   saveInterviewSession,
   saveCodingSubmission,
 } from "../services/progress.service.js";
-
-export const dashboard = (_req: Request, res: Response) => {
-  res.json({ readinessScore: 74, scores: { resume: 78, skills: 72, projects: 85, coding: 65, interviews: 70 }, weeklyGoal: { completed: 3, total: 5 }, streak: 6, nextStep: "Practice Arrays and Strings", recentActivity: ["Resume analyzed", "Completed React roadmap milestone", "Solved Two Sum"] });
-};
+import {
+  analyzeResume,
+  generateRoadmap,
+  generateCodingQuestion,
+  evaluateCode,
+  generateCodingHint,
+  generateCodingSolution,
+  startInterview as geminiStartInterview,
+  evaluateInterviewAnswer as geminiEvaluateInterviewAnswer,
+  summarizeInterview as geminiSummarizeInterview,
+  analyzeGithub as geminiAnalyzeGithub,
+} from "../services/gemini.service.js";
+import { logPlatformActivity } from "../models/AdminActivity.js";
 
 export const resumeAnalysis = async (req: Request, res: Response) => {
   try {
     const file = req.file;
-    if (file && env.geminiApiKey) {
-      const isPdf = file.mimetype === "application/pdf" || file.originalname.toLowerCase().endsWith(".pdf");
-      const contentsParts: any[] = [];
-
-      if (isPdf) {
-        contentsParts.push({
-          inlineData: {
-            mimeType: "application/pdf",
-            data: file.buffer.toString("base64")
-          }
-        });
-      } else {
-        contentsParts.push({
-          text: `Resume File Content:\n${file.buffer.toString("utf-8")}`
-        });
-      }
-
-      if (req.body.jobDescription) {
-        contentsParts.push({
-          text: `Target Job Description to match this resume against:\n${String(req.body.jobDescription)}`
-        });
-      }
-
-      contentsParts.push({
-        text: `You are an expert ATS (Applicant Tracking System) reviewer and Senior Technical Career Coach.
-Thoroughly analyze this resume and evaluate its structure, clarity, skills, sections, and ATS compatibility. Also compute Resume-to-Job matching (using the provided job description, or evaluating against target developer market standards if none provided).
-Return ONLY a valid JSON object (no markdown formatting, no code block markers) with this exact schema:
-{
-  "atsScore": <number between 0 and 100>,
-  "candidateName": "<candidate name or 'Candidate'>",
-  "fileName": "${file.originalname.replace(/"/g, "")}",
-  "summary": "<2-3 sentence executive summary of the resume>",
-  "categoryScores": {
-    "atsCompatibility": <number 0-100>,
-    "skills": <number 0-100>,
-    "experience": <number 0-100>,
-    "projects": <number 0-100>,
-    "education": <number 0-100>,
-    "formatting": <number 0-100>,
-    "keywords": <number 0-100>
-  },
-  "jobMatch": {
-    "overallMatch": <number 0-100>,
-    "experienceMatch": <number 0-100>,
-    "matchedSkills": ["<skill 1>", "<skill 2>", "<skill 3>", "<skill 4>"],
-    "missingKeywords": ["<keyword 1>", "<keyword 2>", "<keyword 3>"]
-  },
-  "sectionAnalysis": [
-    {
-      "section": "Contact Information",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Career Objective / Summary",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Skills",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Education",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Experience",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Projects",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Certifications",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Achievements",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    },
-    {
-      "section": "Extra Activities",
-      "score": <number 0-100>,
-      "status": "<'Good' | 'Needs Improvement' | 'Critical'>",
-      "feedback": "<detailed feedback for this section>"
-    }
-  ],
-  "changesRequired": [
-    {
-      "section": "<resume section where change is needed>",
-      "issue": "<current problem or deficiency in this section>",
-      "exactChange": "<exact step-by-step modification or rewrite to make>"
-    }
-  ],
-  "strengths": ["<detailed strength 1>", "<strength 2>", "<strength 3>"],
-  "weaknesses": ["<detailed weakness 1>", "<weakness 2>", "<weakness 3>"],
-  "missingSkills": ["<missing skill 1>", "<missing skill 2>", "<missing skill 3>", "<missing skill 4>"],
-  "suggestions": ["<actionable suggestion 1>", "<actionable suggestion 2>", "<actionable suggestion 3>"],
-  "recommendedRoles": ["<target role 1>", "<target role 2>", "<target role 3>"]
-}`
-      });
-
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${env.geminiApiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: contentsParts }]
-          })
-        }
-      );
-
-      const geminiData = await geminiRes.json();
-      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (rawText) {
-        const cleanedText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleanedText);
-        const userId = (req as AuthRequest).userId;
-        if (userId) saveResumeAnalysis(userId, parsed);
-        return res.json(parsed);
-      }
+    if (!file) {
+      return res.status(400).json({ message: "Resume file (PDF or text) is required." });
     }
 
-    const fallbackResume = {
-      atsScore: 78,
-      candidateName: "Candidate",
-      fileName: file?.originalname ?? "Sample_Resume.pdf",
-      summary: "Resume uploaded and analyzed. The profile shows promising technical ability with solid foundational projects, though quantifiable metrics and keyword density should be enhanced.",
-      categoryScores: {
-        atsCompatibility: 85,
-        skills: 78,
-        experience: 72,
-        projects: 82,
-        education: 90,
-        formatting: 75,
-        keywords: 68
-      },
-      jobMatch: {
-        overallMatch: 84,
-        experienceMatch: 82,
-        matchedSkills: ["React", "JavaScript", "Node.js", "MongoDB"],
-        missingKeywords: ["TypeScript", "Docker", "AWS"]
-      },
-      changesRequired: [
-        {
-          section: "Contact Information & Profiles",
-          issue: "Missing clickable GitHub and live portfolio links.",
-          exactChange: "Add direct, clickable links to your GitHub profile, LinkedIn, and personal portfolio immediately below your phone number and email."
-        },
-        {
-          section: "Professional Summary",
-          issue: "Current summary is either missing or too generic without target role clarity.",
-          exactChange: "Replace generic objective with a 3-line targeted summary: 'Full-Stack Developer skilled in React, Node.js, and PostgreSQL. Experienced in developing scalable web applications and responsive REST APIs.'"
-        },
-        {
-          section: "Work Experience / Internships",
-          issue: "Bullet points describe job duties rather than measurable results and achievements.",
-          exactChange: "Rewrite bullets using the formula: Action Verb + Task + Impact. E.g., change 'worked on backend APIs' to 'Engineered 12+ RESTful API endpoints handling 2,500+ daily user requests.'"
-        },
-        {
-          section: "Technical Skills Section",
-          issue: "Skills are presented in a flat unorganized list and miss essential modern tooling.",
-          exactChange: "Categorize skills clearly: 'Frontend: React, HTML5, CSS3, Tailwind', 'Backend: Node.js, Express', 'Databases: PostgreSQL, MongoDB', 'Tools & DevOps: Git, Docker, Postman', and explicitly add TypeScript."
-        },
-        {
-          section: "Projects Section",
-          issue: "Project bullets lack deployment links, architectural scope, and metrics.",
-          exactChange: "For every project include: [Live Demo Link] | [GitHub Repository], list the exact stack, and detail 2-3 key technical challenges you solved (e.g. state management, caching, auth)."
-        }
-      ],
-      sectionAnalysis: [
-        {
-          section: "Contact Information",
-          score: 95,
-          status: "Good",
-          feedback: "Complete contact info provided. Ensure LinkedIn, GitHub, and live portfolio links are present and clickable."
-        },
-        {
-          section: "Career Objective / Summary",
-          score: 70,
-          status: "Needs Improvement",
-          feedback: "Add a crisp 2-3 line summary emphasizing target role and key technical accomplishments."
-        },
-        {
-          section: "Skills",
-          score: 78,
-          status: "Needs Improvement",
-          feedback: "Categorize skills cleanly into Frontend, Backend, Databases, and DevOps for optimal ATS keyword parsing."
-        },
-        {
-          section: "Education",
-          score: 90,
-          status: "Good",
-          feedback: "Degree, institution, and graduation timeline are properly highlighted."
-        },
-        {
-          section: "Experience",
-          score: 72,
-          status: "Needs Improvement",
-          feedback: "Bullet points should lead with strong action verbs and include metrics/impact numbers."
-        },
-        {
-          section: "Projects",
-          score: 82,
-          status: "Good",
-          feedback: "Good projects, but project descriptions lack measurable results and live demo URLs."
-        },
-        {
-          section: "Certifications",
-          score: 65,
-          status: "Needs Improvement",
-          feedback: "Add industry-recognized cloud or full-stack certifications to strengthen profile authority."
-        },
-        {
-          section: "Achievements",
-          score: 70,
-          status: "Needs Improvement",
-          feedback: "Showcase hackathon achievements, competitive programming rankings, or academic awards."
-        },
-        {
-          section: "Extra Activities",
-          score: 60,
-          status: "Critical",
-          feedback: "Include relevant tech community leadership, open-source contributions, or workshop participation."
-        }
-      ],
-      strengths: ["Relevant technical coursework and project experience", "Clear and organized layout", "Strong baseline technical competencies"],
-      weaknesses: ["Add measurable outcomes and metrics to experience bullets", "Surface cloud, container, or CI/CD skills", "Include links to deployed demos"],
-      missingSkills: ["Docker", "AWS / Cloud Infrastructure", "Unit / Integration Testing", "TypeScript"],
-      suggestions: ["Lead each project bullet with strong action verbs", "Include concise, high-visibility skills tags", "Quantify project impact with user or performance numbers"],
-      recommendedRoles: ["Full Stack Developer", "Frontend Engineer", "Software Engineer Intern"]
-    };
+    const isPdf = file.mimetype === "application/pdf" || file.originalname.toLowerCase().endsWith(".pdf");
+    const mimeType = isPdf ? "application/pdf" : (file.mimetype || "text/plain");
+
+    const analysis = await analyzeResume({
+      fileBuffer: file.buffer,
+      mimeType,
+      fileName: file.originalname,
+      jobDescription: req.body.jobDescription ? String(req.body.jobDescription) : undefined,
+    });
 
     const userId = (req as AuthRequest).userId;
-    if (userId) saveResumeAnalysis(userId, fallbackResume);
-    return res.json(fallbackResume);
+    if (userId) {
+      saveResumeAnalysis(userId, analysis);
+      logPlatformActivity({
+        userId,
+        userName: (req as any).user?.name || "Candidate",
+        action: `Analyzed resume "${file.originalname}" with ATS score ${analysis.atsScore || 0}%`,
+        module: "resume",
+      });
+    }
+
+    return res.json(analysis);
   } catch (error: any) {
     console.error("Resume analysis error:", error);
-    res.status(500).json({
-      message: "Failed to analyze resume. Please ensure the file is valid and try again.",
-      error: error?.message
+    return res.status(500).json({
+      message: "AI service is temporarily unavailable. Please try again.",
+      error: error?.message,
     });
   }
 };
+
 
 export const startInterview = async (req: Request, res: Response) => {
   try {
@@ -292,150 +75,26 @@ export const startInterview = async (req: Request, res: Response) => {
 
     const count = Math.min(Math.max(Number(questionCount) || 5, 3), 10);
 
-    if (env.geminiApiKey) {
-      try {
-        const prompt = `You are an encouraging, supportive Technical Interviewer conducting a mock interview for a candidate.
-Target Role: ${role}
-Experience Level: ${experience}
-Interview Category: ${type}
-Question Difficulty: ${difficulty}
+    const generated = await geminiStartInterview({
+      role,
+      experience,
+      interviewType: type,
+      difficulty,
+      questionCount: count,
+      resumeContext,
+    });
 
-CRITICAL REQUIREMENT:
-All questions MUST be EASY, friendly, and foundational (suitable for a fresher / beginner / entry-level candidate).
-Do NOT ask complex distributed systems, difficult internal architecture, or hard algorithms.
-Keep questions straightforward, foundational, encouraging, and clear (e.g., basic concepts, what is X, why do we use Y, simple project walkthrough, common fundamental questions).
-Every question must have difficulty: "Easy".
+    const questions = Array.isArray(generated?.questions) && generated.questions.length > 0
+      ? generated.questions
+      : Array.isArray(generated) ? generated : [];
 
-Number of Questions: ${count}
-${resumeContext ? `Candidate Background / Resume Context:
-${resumeContext}
-Ask simple, encouraging questions about their projects and skills without grilling them on hard edge cases!` : ""}
-
-Generate exactly ${count} realistic, EASY, and friendly interview questions.
-Questions should start with a warm-up introduction, progress into clear basic concepts and simple project questions.
-
-Return ONLY a valid JSON array of objects (NO Markdown, NO backticks):
-[
-  {
-    "id": 1,
-    "question": "Tell me about yourself and what got you interested in ${role}.",
-    "category": "Introduction",
-    "difficulty": "Easy",
-    "hints": "Share your background, what technologies you enjoy using, and why you want to work in web development."
-  }
-]`;
-
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-        for (const model of models) {
-          try {
-            const geminiRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.geminiApiKey}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt }] }]
-                })
-              }
-            );
-
-            if (geminiRes.ok) {
-              const data = await geminiRes.json();
-              const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (rawText) {
-                const cleaned = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-                const questions = JSON.parse(cleaned);
-                if (Array.isArray(questions) && questions.length > 0) {
-                  return res.json({ role, experience, type, difficulty, questions });
-                }
-              }
-            }
-          } catch (mErr) {
-            console.warn(`Gemini attempt with ${model} failed, trying fallback...`);
-          }
-        }
-      } catch (geminiError) {
-        console.error("Gemini startInterview error:", geminiError);
-      }
-    }
-
-    // Curated EASY, beginner-friendly questions tailored to role
-    const fallbackQuestionBank: Record<string, Array<{ question: string; category: string; difficulty: string; hints: string }>> = {
-      MERN: [
-        {
-          question: `Tell me about yourself and what got you interested in ${role}?`,
-          category: "Introduction",
-          difficulty: "Easy",
-          hints: "Share your background, what technologies you enjoy using, and why you want to work in web development."
-        },
-        {
-          question: "What is React, and why is it so widely used for building user interfaces?",
-          category: "React Basics",
-          difficulty: "Easy",
-          hints: "Mention reusable components, virtual DOM, and declarative UI development."
-        },
-        {
-          question: "What is the difference between 'props' and 'state' in React?",
-          category: "React Fundamentals",
-          difficulty: "Easy",
-          hints: "Explain that props are passed into a component from its parent (read-only), while state is managed internally."
-        },
-        {
-          question: "In JavaScript, what is the difference between 'var', 'let', and 'const'?",
-          category: "JavaScript Basics",
-          difficulty: "Easy",
-          hints: "Discuss block scoping for let and const vs function scoping for var, and how const prevents re-assignment."
-        },
-        {
-          question: "Can you tell me about a project you enjoyed building and what technologies you used in it?",
-          category: "Projects",
-          difficulty: "Easy",
-          hints: "Briefly explain the project idea, what frontend/backend tools you picked, and what features you created."
-        },
-        {
-          question: "What is Node.js, and why do developers commonly use the Express framework with it?",
-          category: "Node.js & Backend",
-          difficulty: "Easy",
-          hints: "Explain that Node.js runs JavaScript on the server, and Express simplifies creating routes and handling HTTP requests."
-        },
-        {
-          question: "What are common HTTP request methods like GET and POST, and how do they differ?",
-          category: "Web & API Basics",
-          difficulty: "Easy",
-          hints: "Explain that GET is used to retrieve data from the server, while POST is used to send new data in the request body."
-        },
-        {
-          question: "What is MongoDB and how does it store data compared to a traditional SQL database?",
-          category: "Database Basics",
-          difficulty: "Easy",
-          hints: "Explain that MongoDB is a NoSQL database that stores data as JSON-like BSON documents in collections."
-        },
-        {
-          question: "What is the 'useState' hook in React, and can you give a simple example of when you would use it?",
-          category: "React Hooks",
-          difficulty: "Easy",
-          hints: "Explain tracking interactive values like counter numbers, input text, or modal open/close states."
-        },
-        {
-          question: "What are your greatest technical strengths, and what is a new technology you are excited to learn next?",
-          category: "Personal Growth",
-          difficulty: "Easy",
-          hints: "Highlight your enthusiasm for building clean code and staying curious about modern tools."
-        }
-      ]
-    };
-
-    const isMern = role.toLowerCase().includes("mern") || role.toLowerCase().includes("react") || role.toLowerCase().includes("node") || role.toLowerCase().includes("developer") || role.toLowerCase().includes("engineer");
-    const baseQuestions = isMern ? fallbackQuestionBank.MERN : fallbackQuestionBank.MERN;
-    const selectedQuestions = baseQuestions.slice(0, count).map((q, idx) => ({
-      id: idx + 1,
-      ...q
-    }));
-
-    res.json({ role, experience, type, difficulty, questions: selectedQuestions });
+    return res.json({ role, experience, type, difficulty, questions });
   } catch (error: any) {
     console.error("startInterview error:", error);
-    res.status(500).json({ message: "Failed to initialize interview", error: error?.message });
+    return res.status(500).json({
+      message: "AI service is temporarily unavailable. Please try again.",
+      error: error?.message,
+    });
   }
 };
 
@@ -444,128 +103,42 @@ export const evaluateInterviewAnswer = async (req: Request, res: Response) => {
     const {
       role = "MERN Stack Developer",
       experience = "Fresher",
-      question,
-      answer,
-      questionIndex = 0,
-      totalQuestions = 5,
+      question = "",
+      answer = "",
+      category = "Technical",
       metrics = {}
     } = req.body;
 
     const trimmedAnswer = (answer || "").trim();
-    const wordCount = trimmedAnswer ? trimmedAnswer.split(/\s+/).length : 0;
-    const fillerCount = metrics.fillerCount || 0;
-
-    if (env.geminiApiKey && wordCount >= 3) {
-      try {
-        const prompt = `You are a Senior Hiring Manager & Technical Interview Evaluator.
-Evaluate the candidate's spoken response:
-Role: ${role} (${experience})
-Question: "${question}"
-Candidate Answer: "${trimmedAnswer}"
-Speaking Metrics:
-- Words Spoken: ${wordCount}
-- Filler Words Count: ${fillerCount}
-- Speaking Speed: ${metrics.wpm || 90} WPM
-
-Evaluate the response objectively. If the candidate mentions specific projects, tools, or problems, generate an insightful, natural follow-up question.
-Return ONLY a valid JSON object (NO Markdown, NO backticks):
-{
-  "scores": {
-    "relevance": <0-100, how directly it answers the question>,
-    "technicalKnowledge": <0-100, depth of technical terminology and correctness>,
-    "communication": <0-100, clarity, conciseness, and articulation>,
-    "confidence": <0-100, estimated speaking delivery and assertiveness>,
-    "structure": <0-100, logical flow, STAR framework usage>
-  },
-  "overallScore": <0-100>,
-  "feedback": "<2-3 sentence constructive coaching evaluation>",
-  "strengths": ["<specific strength 1>", "<specific strength 2>"],
-  "improvements": ["<concrete area to improve 1>", "<concrete area to improve 2>"],
-  "followUpQuestion": "<contextual follow-up question based directly on what they said, or null if question already answered comprehensively>",
-  "idealAnswer": "<a concise, high-impact model answer illustrating the STAR technique (Situation, Task, Action, Result)>"
-}`;
-
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-        for (const model of models) {
-          try {
-            const geminiRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.geminiApiKey}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt }] }]
-                })
-              }
-            );
-
-            if (geminiRes.ok) {
-              const data = await geminiRes.json();
-              const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (rawText) {
-                const cleaned = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-                const evalResult = JSON.parse(cleaned);
-                return res.json(evalResult);
-              }
-            }
-          } catch (mErr) {
-            console.warn(`Evaluation attempt with ${model} failed, trying fallback...`);
-          }
-        }
-      } catch (geminiError) {
-        console.error("Gemini evaluateInterviewAnswer error:", geminiError);
-      }
+    if (!trimmedAnswer || trimmedAnswer.split(/\s+/).length < 2) {
+      return res.json({
+        scores: { relevance: 30, technicalKnowledge: 30, communication: 40, confidence: 30, structure: 30 },
+        overallScore: 32,
+        feedback: "Please provide a more complete answer so the AI can evaluate your response.",
+        strengths: ["Attempted response"],
+        improvements: ["Provide more details and technical terms", "Use the STAR method"],
+        followUpQuestion: null,
+        idealAnswer: "A strong response should state the core definition and mention a practical example."
+      });
     }
 
-    // Heuristic evaluation fallback
-    let baseScore = 75;
-    if (wordCount < 10) baseScore = 45;
-    else if (wordCount < 25) baseScore = 62;
-    else if (wordCount > 60) baseScore = 84;
-
-    const fillerPenalty = Math.min(fillerCount * 2, 16);
-    const finalScore = Math.max(Math.min(baseScore - fillerPenalty + 5, 95), 35);
-
-    // Dynamic follow-up heuristic (Easy & beginner-friendly)
-    let dynamicFollowUp: string | null = null;
-    const lowerAns = trimmedAnswer.toLowerCase();
-    if (lowerAns.includes("project") || lowerAns.includes("built") || lowerAns.includes("developed")) {
-      dynamicFollowUp = "What was your favorite feature you built in that project, and how does it work?";
-    } else if (lowerAns.includes("react") || lowerAns.includes("frontend")) {
-      dynamicFollowUp = "What was the most fun part of working with React components for that?";
-    } else if (lowerAns.includes("node") || lowerAns.includes("api") || lowerAns.includes("backend")) {
-      dynamicFollowUp = "How did you test your backend API endpoints (for example, using Postman or your browser)?";
-    } else if (lowerAns.includes("database") || lowerAns.includes("mongo")) {
-      dynamicFollowUp = "What kind of information or documents did you store in your MongoDB database?";
-    }
-
-    res.json({
-      scores: {
-        relevance: Math.min(finalScore + 3, 98),
-        technicalKnowledge: Math.min(finalScore - 2, 94),
-        communication: Math.min(finalScore + 1, 95),
-        confidence: Math.max(finalScore - fillerCount * 2, 40),
-        structure: Math.min(finalScore + 2, 96)
-      },
-      overallScore: finalScore,
-      feedback: wordCount > 30
-        ? "Solid technical foundation and good delivery. Deepen your explanation by quoting quantifiable metrics and architectural trade-offs."
-        : "Your answer touches on the right concept, but lacks sufficient technical detail. Expand on your direct responsibilities and technologies used.",
-      strengths: [
-        "Addressed the core intent of the question promptly",
-        "Demonstrated familiarity with key engineering concepts",
-        "Paced answer within standard technical interview length"
-      ],
-      improvements: [
-        fillerCount > 3 ? "Reduce conversational filler words like 'um', 'uh', and 'like' to sound more authoritative" : "Structure response with the STAR framework (Situation, Task, Action, Result)",
-        "Incorporate concrete impact metrics (e.g. latency improvement, user scale)"
-      ],
-      followUpQuestion: dynamicFollowUp,
-      idealAnswer: `When tackling this in a production application, I structure the solution using the STAR method: First identify the business requirement, design modular endpoints/components with clean separation of concerns, enforce strict validation, and verify with automated tests to ensure high scalability and zero regressions.`
+    const evaluation = await geminiEvaluateInterviewAnswer({
+      role,
+      question,
+      category,
+      answer: trimmedAnswer,
+      duration: metrics.duration,
+      wpm: metrics.wpm,
+      fillerCount: metrics.fillerCount,
     });
+
+    return res.json(evaluation);
   } catch (error: any) {
     console.error("evaluateInterviewAnswer error:", error);
-    res.status(500).json({ message: "Failed to evaluate answer", error: error?.message });
+    return res.status(500).json({
+      message: "AI service is temporarily unavailable. Please try again.",
+      error: error?.message,
+    });
   }
 };
 
@@ -581,73 +154,38 @@ export const completeInterview = async (req: Request, res: Response) => {
       avgWpm = 95
     } = req.body;
 
-    const count = evaluations.length || 1;
-    let sumRelevance = 0;
-    let sumTechnical = 0;
-    let sumCommunication = 0;
-    let sumConfidence = 0;
-    let sumStructure = 0;
-    let sumOverall = 0;
-
-    for (const ev of evaluations) {
-      const sc = ev.scores || {};
-      sumRelevance += sc.relevance || 75;
-      sumTechnical += sc.technicalKnowledge || 75;
-      sumCommunication += sc.communication || 75;
-      sumConfidence += sc.confidence || 75;
-      sumStructure += sc.structure || 75;
-      sumOverall += ev.overallScore || 75;
-    }
-
-    const avgOverall = Math.round(sumOverall / count);
-    const avgRelevance = Math.round(sumRelevance / count);
-    const avgTechnical = Math.round(sumTechnical / count);
-    const avgCommunication = Math.round(sumCommunication / count);
-    const avgConfidence = Math.round(sumConfidence / count);
-    const avgStructure = Math.round(sumStructure / count);
-    const avgProblemSolving = Math.round((avgTechnical + avgStructure) / 2);
+    const summary = await geminiSummarizeInterview({
+      role,
+      experience,
+      type,
+      historyItems: evaluations,
+    });
 
     const reportData = {
       role,
       experience,
       type,
-      overallScore: avgOverall,
-      parameterScores: {
-        relevance: avgRelevance,
-        technicalKnowledge: avgTechnical,
-        communication: avgCommunication,
-        confidence: avgConfidence,
-        structure: avgStructure,
-        problemSolving: avgProblemSolving
+      overallScore: summary.overallScore || 75,
+      parameterScores: summary.parameterScores || {
+        relevance: 75,
+        technicalKnowledge: 75,
+        communication: 75,
+        confidence: 75,
+        structure: 75,
+        problemSolving: 75,
       },
       speakingSummary: {
         totalDuration,
         totalFillerWords,
         avgWpm,
-        fillerWarning: totalFillerWords > 8 ? "High filler word density detected. Practice taking a deliberate 1-second breath before answering." : "Great job keeping filler words low."
+        fillerWarning: totalFillerWords > 6 ? "Noticeable filler words detected. Practice deliberate pausing." : "Good pace and filler word control."
       },
-      strengths: [
-        "Strong fundamental knowledge of primary role stack",
-        "Clear and articulate verbal explanation of project experiences",
-        "Responsive to interview prompts with relevant technical terminology"
-      ],
-      areasToImprove: [
-        totalFillerWords > 6 ? "Noticeable filler words ('um', 'uh', 'like') — speak slightly slower to formulate thoughts" : "Quantify project outcomes with measurable performance metrics",
-        "Adopt the STAR method consistently to give answers crisp beginning, middle, and end",
-        "Prepare deeper explanations for distributed systems trade-offs and edge case handling"
-      ],
-      starAdvice: {
-        title: "STAR Technique Mastery Guide",
-        description: "Your answers are technically sound, but structuring them with STAR will elevate your score to top 5% candidate levels:",
-        situation: "Briefly set the context: 'In our e-commerce web app handling 500+ daily active users...'",
-        task: "Define the specific challenge: 'We needed to decrease initial bundle size and secure private routes...'",
-        action: "Explain your exact technical implementation: 'I refactored state into memoized selectors, introduced React.lazy code splitting, and configured JWT cookies with CSRF tokens...'",
-        result: "Deliver the quantifiable punchline: 'This resulted in a 42% faster First Contentful Paint and zero unauthorized session leaks.'"
-      },
-      recommendedNextSteps: [
-        { title: "AI Roadmap Alignment", text: "Generate a targeted study plan focused on advanced asynchronous patterns and database indexing.", link: "/roadmap" },
-        { title: "Coding Practice", text: "Sharpen algorithmic data structures with curated problems on Arrays and Trees.", link: "/coding" },
-        { title: "Resume Polish", text: "Ensure the projects highlighted in this interview are prominently quantified on your resume.", link: "/resume" }
+      strengths: summary.strengths || ["Articulate technical explanations"],
+      areasToImprove: summary.areasToImprove || ["Adopt STAR framework consistently"],
+      starAdvice: summary.starAdvice,
+      recommendedNextSteps: summary.recommendedNextSteps || [
+        { title: "Coding Practice", text: "Practice DSA problems on Career Orbit", link: "/coding" },
+        { title: "AI Roadmap", text: "Complete next roadmap milestone", link: "/roadmap" }
       ]
     };
 
@@ -658,16 +196,23 @@ export const completeInterview = async (req: Request, res: Response) => {
         date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
         role,
         type,
-        score: avgOverall,
-        questionsCount: count,
+        score: reportData.overallScore,
+        questionsCount: evaluations.length || 5,
         report: reportData,
+      });
+
+      logPlatformActivity({
+        userId,
+        userName: (req as any).user?.name || "Candidate",
+        action: `Completed ${type} mock interview for ${role} (Score: ${reportData.overallScore}%)`,
+        module: "interview",
       });
     }
 
     return res.json(reportData);
   } catch (error: any) {
     console.error("completeInterview error:", error);
-    res.status(500).json({ message: "Failed to complete interview", error: error?.message });
+    return res.status(500).json({ message: "Failed to complete interview", error: error?.message });
   }
 };
 
@@ -750,7 +295,7 @@ Return ONLY a valid JSON object with NO Markdown and NO backticks:
   ]
 }`;
 
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        const models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-flash-latest"];
         for (const model of models) {
           try {
             const geminiRes = await fetch(
@@ -772,7 +317,15 @@ Return ONLY a valid JSON object with NO Markdown and NO backticks:
                 const parsed = JSON.parse(cleaned);
                 if (parsed && Array.isArray(parsed.phases) && parsed.phases.length > 0) {
                   const userId = (req as AuthRequest).userId;
-                  if (userId) saveUserRoadmap(userId, parsed);
+                  if (userId) {
+                    saveUserRoadmap(userId, parsed);
+                    logPlatformActivity({
+                      userId,
+                      userName: (req as any).user?.name || "Candidate",
+                      action: `Generated AI Career Roadmap for ${roleClean}`,
+                      module: "roadmap",
+                    });
+                  }
                   return res.json(parsed);
                 }
               }
@@ -968,7 +521,7 @@ Return ONLY a valid JSON object with NO Markdown and NO backticks:
 // Helper to call Gemini text models with fallback
 async function callGeminiText(prompt: string): Promise<string | null> {
   if (!env.geminiApiKey) return null;
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-flash-latest"];
   for (const model of models) {
     try {
       const geminiRes = await fetch(
@@ -1228,6 +781,13 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
             score: evalResult.score,
             passed: evalResult.passed,
             timestamp: "Just now",
+          });
+
+          logPlatformActivity({
+            userId,
+            userName: (req as any).user?.name || "Candidate",
+            action: `Solved coding problem "${req.body.title || "Challenge"}" (${evalResult.score}%)`,
+            module: "coding",
           });
         }
 

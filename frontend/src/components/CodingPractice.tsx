@@ -70,48 +70,7 @@ const COMMON_TOPICS = [
   "Hash Table",
 ];
 
-const INITIAL_HISTORY: PracticeRecord[] = [
-  {
-    id: "init-1",
-    title: "Two Sum",
-    topic: "Arrays",
-    difficulty: "Easy",
-    language: "JavaScript",
-    score: 90,
-    passed: true,
-    timestamp: "1 day ago",
-  },
-  {
-    id: "init-2",
-    title: "Reverse String",
-    topic: "Strings",
-    difficulty: "Easy",
-    language: "Python",
-    score: 85,
-    passed: true,
-    timestamp: "2 days ago",
-  },
-  {
-    id: "init-3",
-    title: "Binary Search",
-    topic: "Binary Search",
-    difficulty: "Medium",
-    language: "C++",
-    score: 80,
-    passed: true,
-    timestamp: "3 days ago",
-  },
-  {
-    id: "init-4",
-    title: "Merge Intervals",
-    topic: "Arrays",
-    difficulty: "Hard",
-    language: "JavaScript",
-    score: 45,
-    passed: false,
-    timestamp: "4 days ago",
-  },
-];
+const INITIAL_HISTORY: PracticeRecord[] = [];
 
 export function CodingPractice() {
   // Practice Setup State
@@ -164,7 +123,7 @@ export function CodingPractice() {
     api
       .get("/coding/history")
       .then((res) => {
-        if (Array.isArray(res.data?.history) && res.data.history.length > 0) {
+        if (Array.isArray(res.data?.history)) {
           setHistory(res.data.history);
           localStorage.setItem("career_orbit_coding_history", JSON.stringify(res.data.history));
         }
