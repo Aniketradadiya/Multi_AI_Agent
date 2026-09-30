@@ -1027,6 +1027,7 @@ export const getPlatformSettings = async (req: AuthRequest, res: Response) => {
       },
       platform: {
         name: platformSettings.platformName,
+        platformName: platformSettings.platformName,
         supportEmail: platformSettings.supportEmail,
         maintenanceMode: platformSettings.maintenanceMode,
       },
@@ -1040,15 +1041,18 @@ export const getPlatformSettings = async (req: AuthRequest, res: Response) => {
 // PUT /api/admin/settings
 export const updatePlatformSettings = async (req: AuthRequest, res: Response) => {
   try {
-    const { platformName, supportEmail, maintenanceMode } = req.body;
+    const { adminName, platformName, supportEmail, maintenanceMode } = req.body;
 
-    if (platformName) platformSettings.platformName = platformName;
-    if (supportEmail) platformSettings.supportEmail = supportEmail;
+    if (adminName && req.userId) {
+      await User.update({ name: adminName.trim() }, { where: { id: req.userId } });
+    }
+    if (platformName) platformSettings.platformName = platformName.trim();
+    if (supportEmail) platformSettings.supportEmail = supportEmail.trim();
     if (typeof maintenanceMode === "boolean") platformSettings.maintenanceMode = maintenanceMode;
 
     await logPlatformActivity({
       userId: req.userId,
-      userName: req.user?.name || "Admin",
+      userName: adminName || req.user?.name || "Admin",
       userEmail: req.user?.email,
       action: `Updated platform settings (Platform: ${platformSettings.platformName})`,
       module: "settings",
@@ -1058,7 +1062,10 @@ export const updatePlatformSettings = async (req: AuthRequest, res: Response) =>
 
     return res.json({
       message: "Platform settings updated successfully",
-      platform: platformSettings,
+      platform: {
+        ...platformSettings,
+        platformName: platformSettings.platformName,
+      },
     });
   } catch (err: any) {
     console.error("Update settings error:", err);

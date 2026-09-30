@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ArrowUpRight, Flame, Target } from "lucide-react";
 import { api } from "../services/api";
 import type { DashboardData } from "../types";
@@ -83,9 +84,9 @@ export function DashboardPage() {
         <article className="panel accent">
           <p className="eyebrow">NEXT BEST MOVE</p>
           <h2>{data.nextStep}</h2>
-          <a href="/coding">
+          <Link to="/coding">
             Start a focused session <ArrowUpRight size={16} />
-          </a>
+          </Link>
         </article>
       </section>
 

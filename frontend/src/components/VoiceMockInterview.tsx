@@ -201,6 +201,43 @@ export function VoiceMockInterview() {
           }
         })
         .catch(() => null);
+
+      // Auto-detect target role from user profile
+      const uRaw = localStorage.getItem("user");
+      if (uRaw) {
+        const u = JSON.parse(uRaw);
+        if (u.targetRole) {
+          setRole(u.targetRole);
+        }
+      }
+
+      // Auto-detect candidate's real resume context from database / storage
+      const applyResumeText = (parsed: any) => {
+        if (!parsed) return;
+        const parts: string[] = [];
+        if (parsed.candidateName) parts.push(`Candidate: ${parsed.candidateName}`);
+        if (parsed.jobMatch?.matchedSkills?.length) {
+          parts.push(`Skills: ${parsed.jobMatch.matchedSkills.join(", ")}`);
+        } else if (parsed.strengths?.length) {
+          parts.push(`Skills & Strengths: ${parsed.strengths.slice(0, 8).join(", ")}`);
+        }
+        if (parsed.summary) parts.push(`Summary: ${parsed.summary}`);
+        if (parts.length > 0) {
+          setResumeContextText(parts.join("\n"));
+        }
+      };
+
+      const resumeRaw = localStorage.getItem("career_orbit_resume_analysis");
+      if (resumeRaw) {
+        applyResumeText(JSON.parse(resumeRaw));
+      } else {
+        api
+          .get("/resume/latest")
+          .then((res) => {
+            if (res.data) applyResumeText(res.data);
+          })
+          .catch(() => null);
+      }
     } catch (e) {
       console.error(e);
     }

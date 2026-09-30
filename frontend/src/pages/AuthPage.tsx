@@ -107,7 +107,15 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const [selectedRole, setSelectedRole] = useState("MERN Stack Developer");
   const [customRole, setCustomRole] = useState("");
 
-  if (localStorage.getItem("token")) return <Navigate to="/dashboard" replace />;
+  const savedUser = localStorage.getItem("user");
+  let isAdmin = false;
+  try {
+    if (savedUser) isAdmin = JSON.parse(savedUser).role === "ADMIN";
+  } catch {}
+
+  if (localStorage.getItem("token")) {
+    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
+  }
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -132,7 +140,11 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
       if (data.user) {
         localStorage.setItem("user", JSON.stringify(data.user));
       }
-      nav("/dashboard");
+      if (data.user?.role === "ADMIN") {
+        nav("/admin");
+      } else {
+        nav("/dashboard");
+      }
     } catch (err: any) {
       setError(err.response?.data?.message ?? "Could not reach the server.");
     } finally {

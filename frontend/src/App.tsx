@@ -22,6 +22,17 @@ function Protected() {
   return localStorage.getItem("token") ? <Layout /> : <Navigate to="/login" replace />;
 }
 
+function FallbackRoute() {
+  const token = localStorage.getItem("token");
+  if (!token) return <Navigate to="/login" replace />;
+  const savedUser = localStorage.getItem("user");
+  let isAdmin = false;
+  try {
+    if (savedUser) isAdmin = JSON.parse(savedUser).role === "ADMIN";
+  } catch {}
+  return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -29,6 +40,9 @@ export default function App() {
         {/* Public authentication routes */}
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
+
+        {/* Root redirect */}
+        <Route path="/" element={<FallbackRoute />} />
 
         {/* Existing standard user platform */}
         <Route element={<Protected />}>
@@ -55,7 +69,7 @@ export default function App() {
         </Route>
 
         {/* Fallback route */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<FallbackRoute />} />
       </Routes>
     </BrowserRouter>
   );
