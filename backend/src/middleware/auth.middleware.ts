@@ -18,7 +18,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     const payload = jwt.verify(token, env.jwtSecret) as { userId: string; role?: string };
     req.userId = payload.userId;
 
-    const user = await User.findByPk(payload.userId, { attributes: ["id", "role", "status"] });
+    const user = await User.findByPk(payload.userId, { attributes: ["id", "name", "email", "role", "status"] });
     if (!user) {
       return res.status(401).json({ message: "User account no longer exists." });
     }
@@ -27,6 +27,8 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       return res.status(403).json({ message: "Account disabled. Please contact the administrator." });
     }
 
+    req.user = user;
+    req.userName = user.name;
     req.userRole = user.role;
     req.userStatus = user.status;
     next();

@@ -22,6 +22,7 @@ import {
   type InterviewSession,
 } from "../services/progress.service.js";
 import { DEFAULT_JOBS } from "../services/job.service.js";
+import { logPlatformActivity } from "../models/AdminActivity.js";
 
 // GET /api/progress
 export const getProgress = async (req: AuthRequest, res: Response) => {
@@ -84,6 +85,19 @@ export const saveCodingSubmissionHandler = (req: AuthRequest, res: Response) => 
   };
 
   const saved = saveCodingSubmission(userId, record);
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `${record.passed ? "Solved" : "Attempted"} coding challenge "${record.title}"`,
+      module: "coding",
+      result: record.passed ? "Accepted" : "Attempted",
+      score: record.score,
+      status: record.passed ? "Completed" : "Review",
+      details: `Topic: ${record.topic}, Language: ${record.language}`,
+    });
+  }
   return res.status(201).json({ message: "Submission recorded", record: saved });
 };
 
@@ -117,6 +131,19 @@ export const saveInterviewSessionHandler = (req: AuthRequest, res: Response) => 
   };
 
   const saved = saveInterviewSession(userId, session);
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `Saved interview session for ${session.role}`,
+      module: "interview",
+      result: "Completed",
+      score: session.score,
+      status: "Completed",
+      details: `Type: ${session.type}, Questions: ${session.questionsCount}`,
+    });
+  }
   return res.status(201).json({ message: "Session saved", session: saved });
 };
 
@@ -149,6 +176,17 @@ export const saveRoadmapHandler = (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: "Valid roadmap object with phases is required." });
   }
   const saved = saveUserRoadmap(userId, req.body);
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `Saved roadmap for ${req.body.targetRole || "Career"}`,
+      module: "roadmap",
+      result: "Saved",
+      status: "Active",
+    });
+  }
   return res.json({ message: "Roadmap saved successfully", roadmap: saved });
 };
 
@@ -162,6 +200,17 @@ export const toggleRoadmapTopicHandler = (req: AuthRequest, res: Response) => {
   const updated = toggleRoadmapTopic(userId, Number(phaseId), String(topicId));
   if (!updated) {
     return res.status(404).json({ message: "Roadmap or topic not found." });
+  }
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `Updated milestone progress in roadmap`,
+      module: "roadmap",
+      result: "Updated",
+      status: "In Progress",
+    });
   }
   return res.json({ message: "Topic milestone toggled", roadmap: updated });
 };
@@ -192,6 +241,19 @@ export const saveResumeHandler = (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: "Resume analysis data required." });
   }
   const saved = saveResumeAnalysis(userId, req.body);
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `Saved resume analysis "${req.body.fileName || "Resume"}"`,
+      module: "resume",
+      result: "Saved",
+      score: req.body.atsScore || 0,
+      status: "Completed",
+      details: `ATS Score: ${req.body.atsScore || 0}%`,
+    });
+  }
   return res.json({ message: "Resume analysis saved", analysis: saved });
 };
 
@@ -214,6 +276,18 @@ export const saveGithubHandler = (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: "GitHub analysis data required." });
   }
   const saved = saveGithubAnalysis(userId, req.body);
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `Saved GitHub portfolio audit`,
+      module: "github",
+      result: "Saved",
+      score: req.body.portfolioScore?.overall || 75,
+      status: "Completed",
+    });
+  }
   return res.json({ message: "GitHub analysis saved", analysis: saved });
 };
 

@@ -45,9 +45,14 @@ export const resumeAnalysis = async (req: Request, res: Response) => {
       saveResumeAnalysis(userId, analysis);
       logPlatformActivity({
         userId,
-        userName: (req as any).user?.name || "Candidate",
-        action: `Analyzed resume "${file.originalname}" with ATS score ${analysis.atsScore || 0}%`,
+        userName: (req as any).user?.name || (req as AuthRequest).userName,
+        userEmail: (req as any).user?.email,
+        action: `Analyzed resume "${file.originalname}"`,
         module: "resume",
+        result: "Analyzed",
+        score: analysis.atsScore || 0,
+        status: "Completed",
+        details: `ATS Score: ${analysis.atsScore || 0}%, Candidate: ${analysis.candidateName || "Candidate"}`,
       });
     }
 
@@ -203,9 +208,14 @@ export const completeInterview = async (req: Request, res: Response) => {
 
       logPlatformActivity({
         userId,
-        userName: (req as any).user?.name || "Candidate",
-        action: `Completed ${type} mock interview for ${role} (Score: ${reportData.overallScore}%)`,
+        userName: (req as any).user?.name || (req as AuthRequest).userName,
+        userEmail: (req as any).user?.email,
+        action: `Completed ${type} mock interview for ${role}`,
         module: "interview",
+        result: "Completed",
+        score: reportData.overallScore,
+        status: "Completed",
+        details: `Overall Score: ${reportData.overallScore}%, Questions: ${evaluations.length || 5}`,
       });
     }
 
@@ -321,9 +331,14 @@ Return ONLY a valid JSON object with NO Markdown and NO backticks:
                     saveUserRoadmap(userId, parsed);
                     logPlatformActivity({
                       userId,
-                      userName: (req as any).user?.name || "Candidate",
+                      userName: (req as any).user?.name || (req as AuthRequest).userName,
+                      userEmail: (req as any).user?.email,
                       action: `Generated AI Career Roadmap for ${roleClean}`,
                       module: "roadmap",
+                      result: "Generated",
+                      score: 0,
+                      status: "Active",
+                      details: `Target: ${roleClean}, Level: ${skillLevel}`,
                     });
                   }
                   return res.json(parsed);
@@ -785,9 +800,14 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
 
           logPlatformActivity({
             userId,
-            userName: (req as any).user?.name || "Candidate",
-            action: `Solved coding problem "${req.body.title || "Challenge"}" (${evalResult.score}%)`,
+            userName: (req as any).user?.name || (req as AuthRequest).userName,
+            userEmail: (req as any).user?.email,
+            action: `${evalResult.passed ? "Solved" : "Attempted"} coding problem "${req.body.title || "Challenge"}"`,
             module: "coding",
+            result: evalResult.passed ? "Accepted" : "Attempted",
+            score: evalResult.score,
+            status: evalResult.passed ? "Completed" : "Review",
+            details: `Topic: ${topic || "Algorithms"}, Difficulty: ${difficulty || "Easy"}`,
           });
         }
 
@@ -838,6 +858,18 @@ Return ONLY a valid JSON object (no markdown ticks, no extra text):
       score: fallbackEval.score,
       passed: fallbackEval.passed,
       timestamp: "Just now",
+    });
+
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || (req as AuthRequest).userName,
+      userEmail: (req as any).user?.email,
+      action: `${fallbackEval.passed ? "Solved" : "Attempted"} coding problem "${req.body.title || "Challenge"}"`,
+      module: "coding",
+      result: fallbackEval.passed ? "Accepted" : "Attempted",
+      score: fallbackEval.score,
+      status: fallbackEval.passed ? "Completed" : "Review",
+      details: `Topic: ${topic || "Algorithms"}, Difficulty: ${difficulty || "Easy"}`,
     });
   }
 
@@ -1106,6 +1138,20 @@ export const jobs = async (req: AuthRequest, res: Response) => {
     const savedIds = req.userId ? getSavedJobIds(req.userId) : [];
     const aiRecommendation = await generateAIRecommendation(candidateSkills, role, matchedJobs);
 
+    if (req.userId) {
+      logPlatformActivity({
+        userId: req.userId,
+        userName: (req as any).user?.name || (req as AuthRequest).userName,
+        userEmail: (req as any).user?.email,
+        action: `Matched ${matchedJobs.length} jobs for ${role || "Candidate"}`,
+        module: "job",
+        result: "Matched",
+        score: matchedJobs[0]?.matchScore || 0,
+        status: "Completed",
+        details: `Top Match: ${matchedJobs[0]?.title || "Position"} (${matchedJobs[0]?.matchScore || 0}%)`,
+      });
+    }
+
     return res.json({
       success: true,
       jobs: matchedJobs,
@@ -1141,6 +1187,18 @@ export const toggleSaveJob = (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: "jobId is required" });
   }
   const result = toggleSavedJob(userId, jobId);
+  if (userId && userId !== "anonymous") {
+    logPlatformActivity({
+      userId,
+      userName: (req as any).user?.name || req.userName,
+      userEmail: (req as any).user?.email,
+      action: `${result.isSaved ? "Saved" : "Removed"} job listing "${jobId}"`,
+      module: "job",
+      result: result.isSaved ? "Saved" : "Removed",
+      status: "Completed",
+      details: `Job ID: ${jobId}`,
+    });
+  }
   return res.json(result);
 };
 
@@ -1480,7 +1538,20 @@ Instructions:
     };
 
     const userId = (req as AuthRequest).userId;
-    if (userId) saveGithubAnalysis(userId, githubResult);
+    if (userId) {
+      saveGithubAnalysis(userId, githubResult);
+      logPlatformActivity({
+        userId,
+        userName: (req as any).user?.name || (req as AuthRequest).userName,
+        userEmail: (req as any).user?.email,
+        action: `Analyzed GitHub profile (@${profileSummary.username})`,
+        module: "github",
+        result: "Completed",
+        score: portfolioScore.overall || 75,
+        status: "Completed",
+        details: `Repositories: ${enrichedRepos.length}, Overall Score: ${portfolioScore.overall || 75}%`,
+      });
+    }
     return res.json(githubResult);
   } catch (error: any) {
     console.error("GitHub Analysis Error:", error);

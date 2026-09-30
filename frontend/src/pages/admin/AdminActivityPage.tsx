@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
-import { Activity, Clock, Filter, RefreshCw } from "lucide-react";
+import { Filter, RefreshCw, Search } from "lucide-react";
 import { api } from "../../services/api";
 
 interface ActivityItem {
   id: string;
+  _id?: string;
   userId?: string;
   userName: string;
+  userEmail?: string;
   action: string;
+  activity?: string;
   module: string;
+  result?: string;
+  score?: number | null;
+  status?: string;
   details?: string;
   createdAt: string;
 }
@@ -16,6 +22,7 @@ export function AdminActivityPage() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterModule, setFilterModule] = useState<string>("ALL");
+  const [search, setSearch] = useState<string>("");
 
   useEffect(() => {
     fetchActivities();
@@ -24,7 +31,7 @@ export function AdminActivityPage() {
   const fetchActivities = async () => {
     setLoading(true);
     try {
-      const res = await api.get("/admin/activity", { params: { limit: 50 } });
+      const res = await api.get("/admin/activity", { params: { limit: 100 } });
       setActivities(res.data?.activities || []);
     } catch (err) {
       console.error("Failed to load activity log:", err);
@@ -34,13 +41,22 @@ export function AdminActivityPage() {
   };
 
   const filtered = activities.filter((a) => {
-    if (filterModule === "ALL") return true;
-    return a.module.toLowerCase() === filterModule.toLowerCase();
+    const matchesModule = filterModule === "ALL" || a.module.toLowerCase() === filterModule.toLowerCase();
+    const query = search.toLowerCase().trim();
+    const matchesSearch =
+      !query ||
+      (a.userName && a.userName.toLowerCase().includes(query)) ||
+      (a.userEmail && a.userEmail.toLowerCase().includes(query)) ||
+      (a.action && a.action.toLowerCase().includes(query)) ||
+      (a.details && a.details.toLowerCase().includes(query));
+
+    return matchesModule && matchesSearch;
   });
 
   const formatTimestamp = (dateStr: string) => {
     try {
       const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
       return d.toLocaleDateString("en-US", {
         day: "numeric",
         month: "short",
@@ -66,17 +82,24 @@ export function AdminActivityPage() {
         </button>
       </div>
 
-      {/* Module Filters */}
+      {/* Filters and Search Bar */}
       <div className="admin-filters-bar">
-        <div className="admin-filter-label-group">
-          <Filter size={15} />
-          <span>Filter by Module:</span>
+        <div className="admin-search-form" style={{ maxWidth: 320 }}>
+          <Search size={16} className="search-icon" />
+          <input
+            type="text"
+            placeholder="Search activity by user, email, or action..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="admin-search-input"
+          />
         </div>
+
         <div className="admin-pill-group">
-          {["ALL", "auth", "resume", "interview", "coding", "roadmap", "github", "admin"].map((mod) => (
+          {["ALL", "resume", "interview", "coding", "roadmap", "job", "github", "auth", "admin"].map((mod) => (
             <button
               key={mod}
-              className={`filter-pill ${filterModule === mod ? "active" : ""}`}
+              className={`filter-pill ${filterModule.toLowerCase() === mod.toLowerCase() ? "active" : ""}`}
               onClick={() => setFilterModule(mod)}
             >
               {mod.toUpperCase()}
@@ -85,36 +108,73 @@ export function AdminActivityPage() {
         </div>
       </div>
 
-      <div className="admin-card">
+      <div className="admin-table-wrapper">
         {loading ? (
           <div className="admin-loading-state">
             <div className="admin-spinner" />
             <p>Fetching platform audit logs...</p>
           </div>
         ) : filtered.length === 0 ? (
-          <p className="admin-empty-state">No activities recorded for this module yet.</p>
-        ) : (
-          <div className="admin-activity-list">
-            {filtered.map((item) => (
-              <div key={item.id} className="admin-activity-item">
-                <div className="activity-icon-bullet">
-                  <div className="bullet-dot" />
-                </div>
-                <div className="admin-activity-info">
-                  <p className="activity-action-text">
-                    <strong>{item.userName}</strong> {item.action}
-                  </p>
-                  {item.details && <p className="activity-detail-note">{item.details}</p>}
-                </div>
-                <div className="admin-activity-meta">
-                  <span className={`module-badge module-${item.module}`}>{item.module}</span>
-                  <span className="activity-time">
-                    <Clock size={12} /> {formatTimestamp(item.createdAt)}
-                  </span>
-                </div>
-              </div>
-            ))}
+          <div className="admin-empty-state">
+            <p>No activity found.</p>
           </div>
+        ) : (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Email</th>
+                <th>Module</th>
+                <th>Activity</th>
+                <th>Result/Score</th>
+                <th>Date</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <div className="table-user-cell">
+                      <div className="table-avatar-initials">
+                        {(item.userName || "U").slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <strong className="table-user-name">{item.userName}</strong>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span className="table-email-text">{item.userEmail || "—"}</span>
+                  </td>
+                  <td>
+                    <span className={`module-badge module-${(item.module || "general").toLowerCase()}`}>
+                      {item.module}
+                    </span>
+                  </td>
+                  <td>
+                    <div>
+                      <span className="activity-action-text">{item.action || item.activity}</span>
+                      {item.details && <p className="activity-detail-note">{item.details}</p>}
+                    </div>
+                  </td>
+                  <td>
+                    <strong>
+                      {item.result || (item.score !== null && item.score !== undefined ? `${item.score}` : "—")}
+                    </strong>
+                  </td>
+                  <td>
+                    <span className="table-date-text">{formatTimestamp(item.createdAt)}</span>
+                  </td>
+                  <td>
+                    <span className={`table-status-pill status-${(item.status || "completed").toLowerCase()}`}>
+                      <span className="status-dot" /> {item.status || "Completed"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>

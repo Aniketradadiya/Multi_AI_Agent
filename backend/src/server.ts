@@ -6,7 +6,7 @@ import { authRouter } from "./routes/auth.routes.js";
 import { careerRouter } from "./routes/career.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 
-const app = express();
+export const app = express();
 app.use(cors({ origin: "*" }));
 
 app.use(express.json({ limit: "1mb" }));

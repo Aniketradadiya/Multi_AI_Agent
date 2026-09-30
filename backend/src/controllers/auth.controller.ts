@@ -61,8 +61,11 @@ export const register = async (req: Request, res: Response) => {
   await logPlatformActivity({
     userId: user.id,
     userName: user.name,
+    userEmail: user.email,
     action: "User registered",
     module: "auth",
+    result: "Created",
+    status: "Completed",
     details: `Registered with email: ${user.email} (${user.role})`,
   });
 
@@ -93,8 +96,11 @@ export const login = async (req: Request, res: Response) => {
   await logPlatformActivity({
     userId: user.id,
     userName: user.name,
+    userEmail: user.email,
     action: "User logged in",
     module: "auth",
+    result: "Success",
+    status: "Completed",
     details: `${user.name} logged into ${user.role} role`,
   });
 

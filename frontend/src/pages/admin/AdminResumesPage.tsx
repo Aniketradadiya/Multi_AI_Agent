@@ -1,12 +1,25 @@
 import { useEffect, useState } from "react";
-import { FileText, Award, AlertCircle, CheckCircle2, TrendingUp, Sparkles } from "lucide-react";
+import { FileText, Award, AlertCircle, CheckCircle2, TrendingUp, RefreshCw, User as UserIcon } from "lucide-react";
 import { api } from "../../services/api";
+
+interface ResumeRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  fileName: string;
+  candidateName: string;
+  atsScore: number;
+  createdAt: string;
+  summary?: string;
+}
 
 interface ResumeAnalyticsData {
   totalResumesAnalyzed: number;
   averageAtsScore: number;
   topSkills: string[];
   commonSkillGaps: string[];
+  resumes: ResumeRecord[];
 }
 
 export function AdminResumesPage() {
@@ -14,12 +27,31 @@ export function AdminResumesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    fetchResumes();
+  }, []);
+
+  const fetchResumes = () => {
+    setLoading(true);
     api
       .get("/admin/resumes")
       .then((res) => setData(res.data))
       .catch((err) => console.error("Error loading resume analytics:", err))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  const formatDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return dateStr;
+    }
+  };
 
   if (loading) {
     return (
@@ -30,11 +62,12 @@ export function AdminResumesPage() {
     );
   }
 
-  const { totalResumesAnalyzed, averageAtsScore, topSkills, commonSkillGaps } = data || {
+  const { totalResumesAnalyzed, averageAtsScore, topSkills, commonSkillGaps, resumes } = data || {
     totalResumesAnalyzed: 0,
-    averageAtsScore: 74,
-    topSkills: ["JavaScript", "React", "Node.js", "Python", "TypeScript"],
-    commonSkillGaps: ["Docker", "AWS", "Kubernetes", "System Design"],
+    averageAtsScore: 0,
+    topSkills: [],
+    commonSkillGaps: [],
+    resumes: [],
   };
 
   return (
@@ -44,7 +77,13 @@ export function AdminResumesPage() {
           <h2>Resume Analytics</h2>
           <p className="admin-page-sub">ATS pass rates, prevalent applicant skillsets, and recurrent industry gaps.</p>
         </div>
-        <div className="admin-user-count-badge">Total Scanned: {totalResumesAnalyzed}</div>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div className="admin-user-count-badge">Total Scanned: {totalResumesAnalyzed}</div>
+          <button className="admin-refresh-btn" onClick={fetchResumes} title="Refresh resume data">
+            <RefreshCw size={15} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       <div className="admin-kpi-row">
@@ -74,7 +113,7 @@ export function AdminResumesPage() {
           </div>
           <div>
             <span className="kpi-label">Benchmark Readiness</span>
-            <strong className="kpi-value">{averageAtsScore >= 70 ? "Competitive" : "Developing"}</strong>
+            <strong className="kpi-value">{averageAtsScore >= 70 ? "Competitive" : averageAtsScore > 0 ? "Developing" : "No Data"}</strong>
           </div>
         </div>
       </div>
@@ -92,13 +131,17 @@ export function AdminResumesPage() {
             </div>
           </div>
 
-          <div className="skills-tags-cluster">
-            {topSkills.map((skill, index) => (
-              <span key={index} className="admin-skill-chip detected">
-                <span className="chip-rank">#{index + 1}</span> {skill}
-              </span>
-            ))}
-          </div>
+          {topSkills.length === 0 ? (
+            <p className="admin-empty-state" style={{ padding: "20px" }}>No skills recorded yet.</p>
+          ) : (
+            <div className="skills-tags-cluster">
+              {topSkills.map((skill, index) => (
+                <span key={index} className="admin-skill-chip detected">
+                  <span className="chip-rank">#{index + 1}</span> {skill}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Common Skill Gaps */}
@@ -113,14 +156,79 @@ export function AdminResumesPage() {
             </div>
           </div>
 
-          <div className="skills-tags-cluster">
-            {commonSkillGaps.map((gap, index) => (
-              <span key={index} className="admin-skill-chip missing">
-                <span className="chip-rank-gap">!</span> {gap}
-              </span>
-            ))}
+          {commonSkillGaps.length === 0 ? (
+            <p className="admin-empty-state" style={{ padding: "20px" }}>No skill gaps recorded yet.</p>
+          ) : (
+            <div className="skills-tags-cluster">
+              {commonSkillGaps.map((gap, index) => (
+                <span key={index} className="admin-skill-chip missing">
+                  <span className="chip-rank-gap">!</span> {gap}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* User-Specific Resume Activity Table */}
+      <div className="admin-card" style={{ marginTop: "24px" }}>
+        <div className="admin-card-head">
+          <div>
+            <h3>Candidate Resume Activity</h3>
+            <p className="admin-card-sub">Real-time candidate resume uploads, evaluated scores, and file logs</p>
+          </div>
+          <div className="admin-badge-subtle">
+            <FileText size={14} /> Database Verified
           </div>
         </div>
+
+        {(!resumes || resumes.length === 0) ? (
+          <p className="admin-empty-state">No resume activity found.</p>
+        ) : (
+          <div className="admin-table-wrapper" style={{ border: "none" }}>
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>User Name</th>
+                  <th>Email</th>
+                  <th>Resume File</th>
+                  <th>ATS Score</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resumes.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <div className="table-user-cell">
+                        <div className="table-avatar-initials">
+                          {(item.userName || "U").slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <strong className="table-user-name">{item.userName}</strong>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="table-email-text">{item.userEmail || "—"}</span>
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: 600, color: "#15251f" }}>{item.fileName}</span>
+                    </td>
+                    <td>
+                      <span className={`table-role-badge ${item.atsScore >= 70 ? "role-user" : "role-admin"}`}>
+                        {item.atsScore}%
+                      </span>
+                    </td>
+                    <td>
+                      <span className="table-date-text">{formatDate(item.createdAt)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

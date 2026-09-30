@@ -11,6 +11,7 @@ import {
   Sparkles,
   BarChart3,
   TrendingUp,
+  RefreshCw,
 } from "lucide-react";
 import {
   AreaChart,
@@ -180,8 +181,19 @@ export function AdminDashboardPage() {
             Real-time analytics across candidates, AI interview simulations, ATS resume scans, and coding assessments.
           </p>
         </div>
-        <div className="admin-hero-glow">
-          <Sparkles size={48} color="#34d399" />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "12px" }}>
+          <div className="admin-hero-glow">
+            <Sparkles size={40} color="#34d399" />
+          </div>
+          <button
+            onClick={fetchStats}
+            className="admin-refresh-btn"
+            style={{ background: "rgba(255, 255, 255, 0.15)", color: "#fff", borderColor: "rgba(255, 255, 255, 0.3)" }}
+            title="Refresh statistics"
+          >
+            <RefreshCw size={14} className={loading ? "spin-icon" : ""} />
+            <span>Refresh Metrics</span>
+          </button>
         </div>
       </div>
 

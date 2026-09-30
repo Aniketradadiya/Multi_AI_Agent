@@ -13,23 +13,37 @@ import {
   Briefcase,
   Layers,
   Award,
+  Clock,
+  Activity,
+  FileText,
+  Mic,
+  Code2,
+  GitBranch,
 } from "lucide-react";
 import { api } from "../../services/api";
 
 interface UserItem {
   id: string;
+  _id?: string;
   name: string;
   email: string;
   role: "USER" | "ADMIN";
   status: "active" | "disabled";
   targetRole?: string;
   createdAt: string;
+  createdDate?: string;
+  lastActivity?: string;
+  resumeCount: number;
+  interviewCount: number;
+  codingCount: number;
+  githubCount: number;
   activityCount: number;
 }
 
 interface UserDetailData {
   user: {
     id: string;
+    _id?: string;
     name: string;
     email: string;
     role: "USER" | "ADMIN";
@@ -39,8 +53,17 @@ interface UserDetailData {
     skills?: string[];
     studyTime?: number;
     createdAt: string;
+    createdDate?: string;
+    lastActivity?: string;
   };
   careerActivity: {
+    resume?: { analyzed: number; latestScore: number };
+    mockInterview?: { completed: number; averageScore: number };
+    coding?: { solved: number; total: number; averageScore: number };
+    roadmap?: { created: number; targetRole: string; progress: number };
+    github?: { analyzed: number; repositoriesAnalyzed: number; latestScore: number };
+    jobMatch?: { jobSearches: number };
+    // Backward-compatibility
     resumeAnalyses: number;
     mockInterviews: number;
     codingProblems: number;
@@ -48,6 +71,16 @@ interface UserDetailData {
     jobMatches: number;
     githubAnalyses: number;
   };
+  recentActivity?: {
+    id: string;
+    module: string;
+    action: string;
+    result?: string;
+    score?: number | null;
+    status?: string;
+    details?: string;
+    createdAt: string;
+  }[];
 }
 
 export function AdminUsersPage() {
@@ -55,6 +88,7 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"ALL" | "USER" | "ADMIN">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "active" | "disabled">("ALL");
 
   // Modals state
   const [viewUser, setViewUser] = useState<UserDetailData | null>(null);
@@ -67,7 +101,7 @@ export function AdminUsersPage() {
 
   useEffect(() => {
     fetchUsers();
-  }, [roleFilter]);
+  }, [roleFilter, statusFilter]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -76,6 +110,7 @@ export function AdminUsersPage() {
         params: {
           q: search || undefined,
           role: roleFilter,
+          status: statusFilter !== "ALL" ? statusFilter : undefined,
         },
       });
       setUsers(res.data?.users || []);
@@ -136,9 +171,12 @@ export function AdminUsersPage() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return "Recently";
     try {
-      return new Date(dateStr).toLocaleDateString("en-US", {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString("en-US", {
         day: "numeric",
         month: "short",
         year: "numeric",
@@ -192,6 +230,15 @@ export function AdminUsersPage() {
               {r === "ALL" ? "All Users" : r === "USER" ? "Users" : "Admins"}
             </button>
           ))}
+          {(["ALL", "active", "disabled"] as const).map((s) => (
+            <button
+              key={s}
+              className={`filter-pill ${statusFilter === s ? "active" : ""}`}
+              onClick={() => setStatusFilter(s)}
+            >
+              {s === "ALL" ? "All Status" : s === "active" ? "Active" : "Disabled"}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -214,7 +261,12 @@ export function AdminUsersPage() {
                 <th>Candidate</th>
                 <th>Email</th>
                 <th>Role</th>
-                <th>Created Date</th>
+                <th>Account Created</th>
+                <th>Last Activity</th>
+                <th>Resume</th>
+                <th>Interview</th>
+                <th>Coding</th>
+                <th>GitHub</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -243,7 +295,30 @@ export function AdminUsersPage() {
                     </span>
                   </td>
                   <td>
-                    <span className="table-date-text">{formatDate(u.createdAt)}</span>
+                    <span className="table-date-text">{u.createdDate || formatDate(u.createdAt)}</span>
+                  </td>
+                  <td>
+                    <span className="table-date-text">{u.lastActivity || "Recently"}</span>
+                  </td>
+                  <td>
+                    <span className="table-activity-count" title="Resumes analyzed">
+                      {u.resumeCount || 0}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="table-activity-count" title="Interviews completed">
+                      {u.interviewCount || 0}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="table-activity-count" title="Coding problems attempted">
+                      {u.codingCount || 0}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="table-activity-count" title="GitHub profiles analyzed">
+                      {u.githubCount || 0}
+                    </span>
                   </td>
                   <td>
                     <span className={`table-status-pill status-${u.status}`}>
@@ -255,7 +330,7 @@ export function AdminUsersPage() {
                       <button
                         className="table-action-btn action-view"
                         onClick={() => handleView(u)}
-                        title="View user analytics"
+                        title="View user activity summary"
                       >
                         <Eye size={15} />
                         <span>View</span>
@@ -267,7 +342,7 @@ export function AdminUsersPage() {
                         title="Toggle USER / ADMIN role"
                       >
                         <Shield size={14} />
-                        <span>Edit Role</span>
+                        <span>Role</span>
                       </button>
 
                       <button
@@ -287,12 +362,12 @@ export function AdminUsersPage() {
         )}
       </div>
 
-      {/* Modal 1: User Profile & Career Activity View */}
+      {/* Modal 1: User Profile & Complete Career Activity Summary */}
       {(viewUser || viewLoading) && (
         <div className="profile-modal-overlay" onClick={() => setViewUser(null)}>
           <div className="profile-modal-card user-detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="profile-modal-header">
-              <h3>User Career Profile</h3>
+              <h3>User Activity Summary</h3>
               <button className="modal-close-btn" onClick={() => setViewUser(null)}>
                 <X size={18} />
               </button>
@@ -301,7 +376,7 @@ export function AdminUsersPage() {
             {viewLoading || !viewUser ? (
               <div className="admin-loading-state" style={{ padding: "40px" }}>
                 <div className="admin-spinner" />
-                <p>Loading candidate dossier...</p>
+                <p>Loading candidate summary...</p>
               </div>
             ) : (
               <div className="profile-modal-body">
@@ -319,60 +394,116 @@ export function AdminUsersPage() {
                 </div>
 
                 <div className="user-detail-section-title">
-                  <UserIcon size={16} /> Basic Information
+                  <UserIcon size={16} /> User Details
                 </div>
                 <div className="user-details-grid">
+                  <div className="detail-item">
+                    <span className="detail-label">User</span>
+                    <span className="detail-val">{viewUser.user.name}</span>
+                  </div>
                   <div className="detail-item">
                     <span className="detail-label">Email</span>
                     <span className="detail-val">{viewUser.user.email}</span>
                   </div>
                   <div className="detail-item">
                     <span className="detail-label">Account Created</span>
-                    <span className="detail-val">{formatDate(viewUser.user.createdAt)}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">Target Role</span>
-                    <span className="detail-val">{viewUser.user.targetRole || "Software Developer"}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">Account Status</span>
-                    <span className={`table-status-pill status-${viewUser.user.status}`}>
-                      {viewUser.user.status.toUpperCase()}
+                    <span className="detail-val">
+                      {viewUser.user.createdDate || formatDate(viewUser.user.createdAt)}
                     </span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">Last Activity</span>
+                    <span className="detail-val">{viewUser.user.lastActivity || "Recently"}</span>
                   </div>
                 </div>
 
                 <div className="user-detail-section-title" style={{ marginTop: "20px" }}>
-                  <Layers size={16} /> Career Orbit Activity
+                  <Layers size={16} /> Career Activity
                 </div>
                 <div className="career-activity-cards-grid">
+                  {/* Resume Activity */}
                   <div className="activity-mini-card">
-                    <span className="mini-card-title">Resumes Analyzed</span>
-                    <strong className="mini-card-val">{viewUser.careerActivity.resumeAnalyses}</strong>
+                    <span className="mini-card-title">Resume</span>
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#15251f" }}>
+                      <div>Resumes analyzed: <strong>{viewUser.careerActivity.resume?.analyzed ?? viewUser.careerActivity.resumeAnalyses}</strong></div>
+                      <div>Latest ATS score: <strong>{viewUser.careerActivity.resume?.latestScore ?? 0}%</strong></div>
+                    </div>
                   </div>
+
+                  {/* Mock Interview Activity */}
                   <div className="activity-mini-card">
-                    <span className="mini-card-title">Mock Interviews</span>
-                    <strong className="mini-card-val">{viewUser.careerActivity.mockInterviews}</strong>
+                    <span className="mini-card-title">Mock Interview</span>
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#15251f" }}>
+                      <div>Interviews completed: <strong>{viewUser.careerActivity.mockInterview?.completed ?? viewUser.careerActivity.mockInterviews}</strong></div>
+                      <div>Average score: <strong>{viewUser.careerActivity.mockInterview?.averageScore ?? 0}%</strong></div>
+                    </div>
                   </div>
+
+                  {/* Coding Activity */}
                   <div className="activity-mini-card">
-                    <span className="mini-card-title">Problems Solved</span>
-                    <strong className="mini-card-val">{viewUser.careerActivity.codingProblems}</strong>
+                    <span className="mini-card-title">Coding</span>
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#15251f" }}>
+                      <div>Problems solved: <strong>{viewUser.careerActivity.coding?.solved ?? viewUser.careerActivity.codingProblems}</strong></div>
+                      <div>Average score: <strong>{viewUser.careerActivity.coding?.averageScore ?? 0}%</strong></div>
+                    </div>
                   </div>
+
+                  {/* AI Roadmap Activity */}
                   <div className="activity-mini-card">
-                    <span className="mini-card-title">Roadmap Progress</span>
-                    <strong className="mini-card-val">
-                      {viewUser.careerActivity.roadmapProgress.percentage}%
-                    </strong>
+                    <span className="mini-card-title">AI Roadmap</span>
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#15251f" }}>
+                      <div>Roadmap created: <strong>{viewUser.careerActivity.roadmap?.created ?? (viewUser.careerActivity.roadmapProgress.percentage > 0 ? 1 : 0)}</strong></div>
+                      <div>Progress: <strong>{viewUser.careerActivity.roadmap?.progress ?? viewUser.careerActivity.roadmapProgress.percentage}%</strong></div>
+                    </div>
                   </div>
+
+                  {/* GitHub Activity */}
                   <div className="activity-mini-card">
-                    <span className="mini-card-title">Saved Jobs</span>
-                    <strong className="mini-card-val">{viewUser.careerActivity.jobMatches}</strong>
+                    <span className="mini-card-title">GitHub</span>
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#15251f" }}>
+                      <div>Profiles analyzed: <strong>{viewUser.careerActivity.github?.analyzed ?? viewUser.careerActivity.githubAnalyses}</strong></div>
+                      <div>Repositories analyzed: <strong>{viewUser.careerActivity.github?.repositoriesAnalyzed ?? 0}</strong></div>
+                    </div>
                   </div>
+
+                  {/* Job Match Activity */}
                   <div className="activity-mini-card">
-                    <span className="mini-card-title">GitHub Analyzed</span>
-                    <strong className="mini-card-val">{viewUser.careerActivity.githubAnalyses}</strong>
+                    <span className="mini-card-title">Job Match</span>
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#15251f" }}>
+                      <div>Job searches/matches: <strong>{viewUser.careerActivity.jobMatch?.jobSearches ?? viewUser.careerActivity.jobMatches}</strong></div>
+                    </div>
                   </div>
                 </div>
+
+                {/* Recent Activity for this User */}
+                <div className="user-detail-section-title" style={{ marginTop: "24px" }}>
+                  <Clock size={16} /> Recent Activity
+                </div>
+                {(!viewUser.recentActivity || viewUser.recentActivity.length === 0) ? (
+                  <p className="admin-empty-state" style={{ padding: "16px", margin: 0 }}>No recent activity for this user.</p>
+                ) : (
+                  <div className="admin-activity-list" style={{ marginTop: 10 }}>
+                    {viewUser.recentActivity.map((act) => (
+                      <div key={act.id} className="admin-activity-item">
+                        <div className="activity-icon-bullet">
+                          <div className="bullet-dot" />
+                        </div>
+                        <div className="admin-activity-info">
+                          <p className="activity-action-text">{act.action}</p>
+                          {act.details && <p className="activity-detail-note">{act.details}</p>}
+                        </div>
+                        <div className="admin-activity-meta">
+                          <span className={`module-badge module-${(act.module || "general").toLowerCase()}`}>
+                            {act.module}
+                          </span>
+                          <span className="activity-time">
+                            <Clock size={12} /> {formatDate(act.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

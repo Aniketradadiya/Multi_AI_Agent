@@ -1,12 +1,25 @@
 import { useEffect, useState } from "react";
-import { GitBranch, Award, Code, CheckCircle, Lightbulb } from "lucide-react";
+import { GitBranch, Award, Code, CheckCircle, Lightbulb, RefreshCw } from "lucide-react";
 import { api } from "../../services/api";
+
+interface GithubRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  username: string;
+  repositoriesCount: number;
+  overallScore: number;
+  result: string;
+  createdAt: string;
+}
 
 interface GithubAnalyticsData {
   profilesAnalyzed: number;
   averagePortfolioScore: number;
   mostCommonTechnologies: string[];
   commonRecommendations: string[];
+  github: GithubRecord[];
 }
 
 export function AdminGitHubPage() {
@@ -14,12 +27,31 @@ export function AdminGitHubPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    fetchGithub();
+  }, []);
+
+  const fetchGithub = () => {
+    setLoading(true);
     api
       .get("/admin/github")
       .then((res) => setData(res.data))
       .catch((err) => console.error("Error loading GitHub analytics:", err))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  const formatDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return dateStr;
+    }
+  };
 
   if (loading) {
     return (
@@ -35,11 +67,13 @@ export function AdminGitHubPage() {
     averagePortfolioScore,
     mostCommonTechnologies,
     commonRecommendations,
+    github,
   } = data || {
     profilesAnalyzed: 0,
-    averagePortfolioScore: 74,
+    averagePortfolioScore: 0,
     mostCommonTechnologies: [],
     commonRecommendations: [],
+    github: [],
   };
 
   return (
@@ -49,7 +83,13 @@ export function AdminGitHubPage() {
           <h2>GitHub Portfolio Analytics</h2>
           <p className="admin-page-sub">Repository quality scores, stack distribution, and recurring codebase advice.</p>
         </div>
-        <div className="admin-user-count-badge">Analyzed: {profilesAnalyzed}</div>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div className="admin-user-count-badge">Analyzed: {profilesAnalyzed}</div>
+          <button className="admin-refresh-btn" onClick={fetchGithub} title="Refresh GitHub metrics">
+            <RefreshCw size={15} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       <div className="admin-kpi-row">
@@ -87,13 +127,17 @@ export function AdminGitHubPage() {
             </div>
           </div>
 
-          <div className="skills-tags-cluster">
-            {mostCommonTechnologies.map((tech, index) => (
-              <span key={index} className="admin-skill-chip detected">
-                <span className="chip-rank">#{index + 1}</span> {tech}
-              </span>
-            ))}
-          </div>
+          {mostCommonTechnologies.length === 0 ? (
+            <p className="admin-empty-state" style={{ padding: "20px" }}>No repositories analyzed yet.</p>
+          ) : (
+            <div className="skills-tags-cluster">
+              {mostCommonTechnologies.map((tech, index) => (
+                <span key={index} className="admin-skill-chip detected">
+                  <span className="chip-rank">#{index + 1}</span> {tech}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Common Recommendations */}
@@ -108,15 +152,81 @@ export function AdminGitHubPage() {
             </div>
           </div>
 
-          <div className="recommendations-list">
-            {commonRecommendations.map((rec, index) => (
-              <div key={index} className="recommendation-item">
-                <CheckCircle size={16} color="#059669" className="rec-icon" />
-                <p className="rec-text">{rec}</p>
-              </div>
-            ))}
+          {commonRecommendations.length === 0 ? (
+            <p className="admin-empty-state" style={{ padding: "20px" }}>No portfolio recommendations yet.</p>
+          ) : (
+            <div className="recommendations-list">
+              {commonRecommendations.map((rec, index) => (
+                <div key={index} className="recommendation-item">
+                  <CheckCircle size={16} color="#059669" className="rec-icon" />
+                  <p className="rec-text">{rec}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* User-Specific GitHub Activity Table */}
+      <div className="admin-card" style={{ marginTop: "24px" }}>
+        <div className="admin-card-head">
+          <div>
+            <h3>Candidate GitHub Analysis Activity</h3>
+            <p className="admin-card-sub">Candidate portfolio scans, analyzed repositories, and overall portfolio scores</p>
+          </div>
+          <div className="admin-badge-subtle">
+            <GitBranch size={14} /> Database Verified
           </div>
         </div>
+
+        {(!github || github.length === 0) ? (
+          <p className="admin-empty-state">No GitHub portfolio analysis activity found.</p>
+        ) : (
+          <div className="admin-table-wrapper" style={{ border: "none" }}>
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>User Name</th>
+                  <th>GitHub Username</th>
+                  <th>Repositories</th>
+                  <th>Analysis Result</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {github.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <div className="table-user-cell">
+                        <div className="table-avatar-initials">
+                          {(item.userName || "U").slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <strong className="table-user-name">{item.userName}</strong>
+                          <span className="table-user-sub">{item.userEmail || "Candidate"}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: 600, color: "#2563eb" }}>@{item.username}</span>
+                    </td>
+                    <td>
+                      <span>{item.repositoriesCount} repos analyzed</span>
+                    </td>
+                    <td>
+                      <span className="table-role-badge role-user">
+                        Score: {item.overallScore}% ({item.result})
+                      </span>
+                    </td>
+                    <td>
+                      <span className="table-date-text">{formatDate(item.createdAt)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

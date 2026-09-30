@@ -9,8 +9,6 @@ import { InterviewSessionModel } from "../models/InterviewSession.js";
 import { GithubAnalysisModel } from "../models/GithubAnalysis.js";
 import { JobActivity } from "../models/JobActivity.js";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
-import { getAllUserStores, getUserStoreData } from "../services/progress.service.js";
-import { DEFAULT_JOBS, getSavedJobIds } from "../services/job.service.js";
 
 // Global platform configuration store
 let platformSettings = {
@@ -19,94 +17,112 @@ let platformSettings = {
   maintenanceMode: false,
 };
 
+// Helper: Batch-fetch User records by userIds safely without type-casting SQL join issues
+const getUserMap = async (records: { userId?: string | null }[]) => {
+  const userIds = Array.from(new Set(records.map((r) => r.userId).filter(Boolean))) as string[];
+  if (userIds.length === 0) return new Map<string, { id: string; name: string; email: string }>();
+  const users = await User.findAll({
+    where: { id: userIds },
+    attributes: ["id", "name", "email"],
+  });
+  return new Map(users.map((u) => [u.id, { id: u.id, name: u.name, email: u.email }]));
+};
+
+// Helper: 7-day registration trend strictly from User.createdAt
+const calculate7DayRegistrations = async () => {
+  const registrationMap: Record<string, number> = {};
+  const dayStarts: { key: string; start: Date; end: Date }[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+
+    const end = new Date(d);
+    end.setHours(23, 59, 59, 999);
+
+    const key = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    registrationMap[key] = 0;
+    dayStarts.push({ key, start: d, end });
+  }
+
+  const oldestDate = dayStarts[0].start;
+  const recentUsers = await User.findAll({
+    where: {
+      createdAt: {
+        [Op.gte]: oldestDate,
+      },
+    },
+    attributes: ["createdAt"],
+  });
+
+  recentUsers.forEach((u) => {
+    const rawDate = new Date(u.createdAt);
+    const key = rawDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    if (registrationMap[key] !== undefined) {
+      registrationMap[key]++;
+    }
+  });
+
+  return dayStarts.map(({ key }) => ({
+    date: key,
+    users: registrationMap[key] || 0,
+  }));
+};
+
 // GET /api/admin/stats
-export const getAdminStats = async (req: AuthRequest, res: Response) => {
+export const getAdminStats = async (_req: AuthRequest, res: Response) => {
   try {
     const totalUsers = await User.count();
+    
+    // Active users: Users with status 'active' in DB
     const activeUsers = await User.count({ where: { status: "active" } });
 
-    // Real database counts
-    const dbResumes = await ResumeAnalysis.count();
-    const dbInterviews = await InterviewSessionModel.count();
-    const dbCoding = await CodingAttempt.count();
-    const dbGithub = await GithubAnalysisModel.count();
-    const dbRoadmaps = await Roadmap.count();
+    // Real database counts only - 0 if no records exist
+    const resumesAnalyzed = await ResumeAnalysis.count();
+    const mockInterviews = await InterviewSessionModel.count();
+    const codingProblemsSolved = await CodingAttempt.count({ where: { passed: true } });
+    const githubProfilesAnalyzed = await GithubAnalysisModel.count();
+    const roadmapsCreated = await Roadmap.count();
+    const jobsSaved = await JobActivity.count({ where: { isSaved: true } });
 
-    // Module usage counts aggregated from real database and in-memory fallback
-    const userStores = getAllUserStores();
-    let cacheResumes = 0;
-    let cacheInterviews = 0;
-    let cacheCoding = 0;
-    let cacheGithub = 0;
-    let cacheRoadmaps = 0;
+    // Real registration trend from User.createdAt
+    const registrationTrend = await calculate7DayRegistrations();
 
-    userStores.forEach((store) => {
-      if (store.resumeAnalysis) cacheResumes++;
-      if (store.githubAnalysis) cacheGithub++;
-      if (store.roadmap) cacheRoadmaps++;
-      cacheInterviews += store.interviewHistory?.length || 0;
-      cacheCoding += store.codingHistory?.length || 0;
-    });
-
-    const resumeLogs = await AdminActivity.count({ where: { module: "resume" } });
-    const interviewLogs = await AdminActivity.count({ where: { module: "interview" } });
-    const codingLogs = await AdminActivity.count({ where: { module: "coding" } });
-    const githubLogs = await AdminActivity.count({ where: { module: "github" } });
-    const roadmapLogs = await AdminActivity.count({ where: { module: "roadmap" } });
-
-    const resumesAnalyzed = Math.max(dbResumes, cacheResumes, resumeLogs);
-    const mockInterviews = Math.max(dbInterviews, cacheInterviews, interviewLogs);
-    const codingProblemsSolved = Math.max(dbCoding, cacheCoding, codingLogs);
-    const githubProfilesAnalyzed = Math.max(dbGithub, cacheGithub, githubLogs);
-    const roadmapsCreated = Math.max(dbRoadmaps, cacheRoadmaps, roadmapLogs);
-
-    // Registration trend (last 7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-    sevenDaysAgo.setHours(0, 0, 0, 0);
-
-    const recentUsers = await User.findAll({
-      where: {
-        createdAt: {
-          [Op.gte]: sevenDaysAgo,
-        },
-      },
-      attributes: ["createdAt"],
-    });
-
-    const registrationMap: Record<string, number> = {};
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      registrationMap[key] = 0;
-    }
-
-    recentUsers.forEach((u) => {
-      const dateKey = new Date(u.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      if (registrationMap[dateKey] !== undefined) {
-        registrationMap[dateKey]++;
-      }
-    });
-
-    const registrationTrend = Object.entries(registrationMap).map(([date, count]) => ({
-      date,
-      users: count,
-    }));
-
-    // Module usage chart data
+    // Module usage counts directly from database tables
     const moduleUsage = [
-      { name: "Resume", count: resumesAnalyzed },
-      { name: "Interview", count: mockInterviews },
-      { name: "Coding", count: codingProblemsSolved },
-      { name: "Roadmap", count: roadmapsCreated },
-      { name: "GitHub", count: githubProfilesAnalyzed },
+      { name: "Resume Analyzer", count: resumesAnalyzed },
+      { name: "Mock Interview", count: mockInterviews },
+      { name: "Coding Practice", count: codingProblemsSolved },
+      { name: "AI Roadmap", count: roadmapsCreated },
+      { name: "Job Match", count: jobsSaved },
+      { name: "GitHub Analyzer", count: githubProfilesAnalyzed },
     ];
 
-    // Recent activity stream
-    const recentActivity = await AdminActivity.findAll({
+    // Recent platform activities with populated user info
+    const activitiesRaw = await AdminActivity.findAll({
       order: [["created_at", "DESC"]],
       limit: 10,
+    });
+
+    const userMap = await getUserMap(activitiesRaw);
+
+    const recentActivity = activitiesRaw.map((item) => {
+      const u = item.userId ? userMap.get(item.userId) : null;
+      return {
+        id: item.id,
+        _id: item.id,
+        userId: item.userId,
+        userName: u?.name || item.userName || "User",
+        userEmail: u?.email || item.userEmail || "",
+        action: item.action,
+        module: item.module,
+        result: item.result || (item.score !== null ? `${item.score}` : "Completed"),
+        score: item.score,
+        status: item.status || "Completed",
+        details: item.details,
+        createdAt: item.createdAt,
+      };
     });
 
     return res.json({
@@ -118,12 +134,14 @@ export const getAdminStats = async (req: AuthRequest, res: Response) => {
         codingProblemsSolved,
         githubProfilesAnalyzed,
         roadmapsCreated,
+        jobsSaved,
       },
       charts: {
         registrationTrend,
         moduleUsage,
       },
       recentActivity,
+      // Backward-compatible properties
       totalUsers,
       activeUsers,
       resumesAnalyzed,
@@ -140,11 +158,49 @@ export const getAdminStats = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// GET /api/admin/registrations
+export const getRegistrations = async (_req: AuthRequest, res: Response) => {
+  try {
+    const registrationTrend = await calculate7DayRegistrations();
+    return res.json({ registrationTrend });
+  } catch (err: any) {
+    console.error("Registrations trend error:", err);
+    return res.status(500).json({ message: "Failed to load registrations trend", error: err.message });
+  }
+};
+
+// GET /api/admin/module-usage
+export const getModuleUsage = async (_req: AuthRequest, res: Response) => {
+  try {
+    const resumesAnalyzed = await ResumeAnalysis.count();
+    const mockInterviews = await InterviewSessionModel.count();
+    const codingProblemsSolved = await CodingAttempt.count({ where: { passed: true } });
+    const githubProfilesAnalyzed = await GithubAnalysisModel.count();
+    const roadmapsCreated = await Roadmap.count();
+    const jobsSaved = await JobActivity.count({ where: { isSaved: true } });
+
+    const moduleUsage = [
+      { name: "Resume Analyzer", count: resumesAnalyzed },
+      { name: "Mock Interview", count: mockInterviews },
+      { name: "Coding Practice", count: codingProblemsSolved },
+      { name: "AI Roadmap", count: roadmapsCreated },
+      { name: "Job Match", count: jobsSaved },
+      { name: "GitHub Analyzer", count: githubProfilesAnalyzed },
+    ];
+
+    return res.json({ moduleUsage });
+  } catch (err: any) {
+    console.error("Module usage error:", err);
+    return res.status(500).json({ message: "Failed to load module usage", error: err.message });
+  }
+};
+
 // GET /api/admin/users
 export const getUsers = async (req: AuthRequest, res: Response) => {
   try {
     const search = String(req.query.search || req.query.q || "").trim();
     const roleFilter = String(req.query.role || "ALL").toUpperCase();
+    const statusFilter = String(req.query.status || "ALL").toLowerCase();
 
     const where: any = {};
 
@@ -161,37 +217,62 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
       where.role = "ADMIN";
     }
 
+    if (statusFilter === "active" || statusFilter === "disabled") {
+      where.status = statusFilter;
+    }
+
     const users = await User.findAll({
       where,
       attributes: ["id", "name", "email", "role", "status", "createdAt", "updatedAt", "targetRole"],
       order: [["createdAt", "DESC"]],
     });
 
-    return res.json({
-      users: users.map((u) => {
-        const rawCreated = (u as any).createdAt || (u as any).created_at || (u as any).dataValues?.created_at;
-        const rawUpdated = (u as any).updatedAt || (u as any).updated_at || (u as any).dataValues?.updated_at;
-        
-        const createdDate = rawCreated && !isNaN(new Date(rawCreated).getTime())
-          ? new Date(rawCreated).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
+    // Populate per-user database activity counts
+    const usersWithStats = await Promise.all(
+      users.map(async (u) => {
+        const userId = u.id;
+        const resumeCount = await ResumeAnalysis.count({ where: { userId } });
+        const interviewCount = await InterviewSessionModel.count({ where: { userId } });
+        const codingCount = await CodingAttempt.count({ where: { userId } });
+        const githubCount = await GithubAnalysisModel.count({ where: { userId } });
+
+        // Get latest activity timestamp for this user
+        const latestActivityRecord = await AdminActivity.findOne({
+          where: { userId },
+          order: [["created_at", "DESC"]],
+          attributes: ["createdAt"],
+        });
+
+        const effectiveDate = latestActivityRecord?.createdAt || u.updatedAt || u.createdAt;
+        const lastActivity = effectiveDate && !isNaN(new Date(effectiveDate).getTime())
+          ? new Date(effectiveDate).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
           : "Recently";
 
-        const lastActivity = rawUpdated && !isNaN(new Date(rawUpdated).getTime())
-          ? new Date(rawUpdated).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
+        const createdDate = u.createdAt && !isNaN(new Date(u.createdAt).getTime())
+          ? new Date(u.createdAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
           : "Recently";
 
         return {
           id: u.id,
+          _id: u.id,
           name: u.name,
           email: u.email,
           role: u.role,
           status: u.status,
           createdDate,
+          createdAt: u.createdAt,
           lastActivity,
-          targetRole: u.targetRole,
+          targetRole: u.targetRole || "Software Developer",
+          resumeCount,
+          interviewCount,
+          codingCount,
+          githubCount,
+          activityCount: resumeCount + interviewCount + codingCount + githubCount,
         };
-      }),
-    });
+      })
+    );
+
+    return res.json({ users: usersWithStats });
   } catch (err: any) {
     console.error("Get users error:", err);
     return res.status(500).json({ message: "Failed to load users", error: err.message });
@@ -203,65 +284,150 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
     const user = await User.findByPk(id, {
-      attributes: ["id", "name", "email", "role", "status", "createdAt", "updatedAt", "targetRole", "experienceLevel"],
+      attributes: ["id", "name", "email", "role", "status", "createdAt", "updatedAt", "targetRole", "experienceLevel", "skills", "studyTime"],
     });
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Query real DB records for this user
-    const resumeCount = await ResumeAnalysis.count({ where: { userId: id } });
-    const interviewCount = await InterviewSessionModel.count({ where: { userId: id } });
-    const codingCount = await CodingAttempt.count({ where: { userId: id } });
-    const roadmapRecord = await Roadmap.findOne({ where: { userId: id } });
-    const githubRecord = await GithubAnalysisModel.findOne({ where: { userId: id } });
-    const jobsSavedCount = await JobActivity.count({ where: { userId: id, isSaved: true } });
+    // 1. Resume records
+    const resumesAnalyzed = await ResumeAnalysis.count({ where: { userId: id } });
+    const latestResume = await ResumeAnalysis.findOne({
+      where: { userId: id },
+      order: [["created_at", "DESC"]],
+    });
+    const latestAtsScore = latestResume?.atsScore || 0;
 
-    // In-memory fallback overlay
-    const store = getUserStoreData(id);
+    // 2. Mock interview records
+    const interviewsCompleted = await InterviewSessionModel.count({ where: { userId: id } });
+    const userInterviews = await InterviewSessionModel.findAll({ where: { userId: id } });
+    const avgInterviewScore = userInterviews.length > 0
+      ? Math.round(userInterviews.reduce((acc, s) => acc + (s.score || 0), 0) / userInterviews.length)
+      : 0;
+
+    // 3. Coding records
+    const codingProblemsSolved = await CodingAttempt.count({ where: { userId: id, passed: true } });
+    const totalCodingAttempts = await CodingAttempt.count({ where: { userId: id } });
+    const userCodingAttempts = await CodingAttempt.findAll({ where: { userId: id } });
+    const avgCodingScore = userCodingAttempts.length > 0
+      ? Math.round(userCodingAttempts.reduce((acc, c) => acc + (c.score || 0), 0) / userCodingAttempts.length)
+      : 0;
+
+    // 4. Roadmap records
+    const roadmapsCreated = await Roadmap.count({ where: { userId: id } });
+    const userRoadmap = await Roadmap.findOne({
+      where: { userId: id },
+      order: [["updated_at", "DESC"]],
+    });
 
     let roadmapProgress = 0;
-    const roadmapPhases = roadmapRecord?.phases || store?.roadmap?.phases;
-    if (Array.isArray(roadmapPhases) && roadmapPhases.length > 0) {
-      let total = 0;
-      let completed = 0;
-      roadmapPhases.forEach((p: any) => {
+    if (userRoadmap && Array.isArray(userRoadmap.phases) && userRoadmap.phases.length > 0) {
+      let totalMilestones = 0;
+      let completedMilestones = 0;
+      userRoadmap.phases.forEach((p: any) => {
         const items = p.topics || p.milestones || [];
-        total += items.length;
-        completed += items.filter((i: any) => i.completed).length;
+        totalMilestones += items.length;
+        completedMilestones += items.filter((item: any) => item.completed).length;
       });
-      roadmapProgress = total > 0 ? Math.round((completed / total) * 100) : 0;
+      roadmapProgress = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
     }
+
+    // 5. GitHub records
+    const githubProfilesAnalyzed = await GithubAnalysisModel.count({ where: { userId: id } });
+    const latestGithub = await GithubAnalysisModel.findOne({
+      where: { userId: id },
+      order: [["created_at", "DESC"]],
+    });
+    const reposAnalyzed = Array.isArray(latestGithub?.repositories) ? latestGithub.repositories.length : 0;
+
+    // 6. Job match records
+    const jobSearches = await JobActivity.count({ where: { userId: id } });
+
+    // 7. Recent activity for this specific user
+    const recentActivitiesRaw = await AdminActivity.findAll({
+      where: { userId: id },
+      order: [["created_at", "DESC"]],
+      limit: 10,
+    });
+
+    const recentActivities = recentActivitiesRaw.map((act) => ({
+      id: act.id,
+      module: act.module,
+      action: act.action,
+      result: act.result || (act.score !== null ? `${act.score}` : "Completed"),
+      score: act.score,
+      status: act.status || "Completed",
+      details: act.details,
+      createdAt: act.createdAt,
+    }));
+
+    const latestAct = recentActivitiesRaw[0];
+    const effectiveLastActivity = latestAct?.createdAt || user.updatedAt || user.createdAt;
 
     return res.json({
       user: {
         id: user.id,
+        _id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
         status: user.status,
-        targetRole: user.targetRole,
-        experienceLevel: user.experienceLevel,
+        targetRole: user.targetRole || "Software Developer",
+        experienceLevel: user.experienceLevel || "Student",
+        skills: user.skills || [],
+        studyTime: user.studyTime || 2,
+        createdAt: user.createdAt,
         createdDate: new Date(user.createdAt).toLocaleDateString("en-US", {
           day: "numeric",
           month: "short",
           year: "numeric",
         }),
-        lastActivity: new Date(user.updatedAt).toLocaleDateString("en-US", {
+        lastActivity: new Date(effectiveLastActivity).toLocaleDateString("en-US", {
           day: "numeric",
           month: "short",
           year: "numeric",
         }),
       },
-      activityMetrics: {
-        resumeAnalyses: Math.max(resumeCount, store?.resumeAnalysis ? 1 : 0),
-        mockInterviews: Math.max(interviewCount, store?.interviewHistory?.length || 0),
-        codingProblemsSolved: Math.max(codingCount, store?.codingHistory?.length || 0),
-        roadmapProgress,
-        jobMatchesSaved: jobsSavedCount,
-        githubAnalyses: Math.max(githubRecord ? 1 : 0, store?.githubAnalysis ? 1 : 0),
+      careerActivity: {
+        resume: {
+          analyzed: resumesAnalyzed,
+          latestScore: latestAtsScore,
+        },
+        mockInterview: {
+          completed: interviewsCompleted,
+          averageScore: avgInterviewScore,
+        },
+        coding: {
+          solved: codingProblemsSolved,
+          total: totalCodingAttempts,
+          averageScore: avgCodingScore,
+        },
+        roadmap: {
+          created: roadmapsCreated,
+          targetRole: userRoadmap?.targetRole || user.targetRole || "Software Developer",
+          progress: roadmapProgress,
+        },
+        github: {
+          analyzed: githubProfilesAnalyzed,
+          repositoriesAnalyzed: reposAnalyzed,
+          latestScore: latestGithub?.overallScore || 0,
+        },
+        jobMatch: {
+          jobSearches,
+        },
+        // Backward compatibility properties for existing modals
+        resumeAnalyses: resumesAnalyzed,
+        mockInterviews: interviewsCompleted,
+        codingProblems: codingProblemsSolved,
+        roadmapProgress: {
+          targetRole: userRoadmap?.targetRole || user.targetRole || "Software Developer",
+          percentage: roadmapProgress,
+        },
+        jobMatches: jobSearches,
+        githubAnalyses: githubProfilesAnalyzed,
       },
+      recentActivity: recentActivities,
     });
   } catch (err: any) {
     console.error("Get user details error:", err);
@@ -290,8 +456,11 @@ export const updateUserRole = async (req: AuthRequest, res: Response) => {
     await logPlatformActivity({
       userId: req.userId,
       userName: req.user?.name || "Admin",
+      userEmail: req.user?.email,
       action: `Changed role of user "${user.name}" (${user.email}) to ${role}`,
       module: "admin",
+      result: "Updated",
+      status: "Completed",
     });
 
     return res.json({ message: `Role updated to ${role}`, user: { id: user.id, role: user.role } });
@@ -322,8 +491,11 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
     await logPlatformActivity({
       userId: req.userId,
       userName: req.user?.name || "Admin",
+      userEmail: req.user?.email,
       action: `${status === "disabled" ? "Disabled" : "Enabled"} account of "${user.name}" (${user.email})`,
       module: "admin",
+      result: status === "disabled" ? "Disabled" : "Active",
+      status: "Completed",
     });
 
     return res.json({ message: `Account status updated to ${status}`, user: { id: user.id, status: user.status } });
@@ -334,9 +506,13 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
 };
 
 // GET /api/admin/resumes
-export const getResumeAnalytics = async (req: AuthRequest, res: Response) => {
+export const getResumeAnalytics = async (_req: AuthRequest, res: Response) => {
   try {
-    const dbResumes = await ResumeAnalysis.findAll({ order: [["created_at", "DESC"]] });
+    const dbResumes = await ResumeAnalysis.findAll({
+      order: [["created_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(dbResumes);
 
     let totalScore = 0;
     const skillCounts: Record<string, number> = {};
@@ -369,12 +545,29 @@ export const getResumeAnalytics = async (req: AuthRequest, res: Response) => {
       .slice(0, 8)
       .map(([name]) => name);
 
+    const resumes = dbResumes.map((r: any) => {
+      const u = r.userId ? userMap.get(r.userId) : null;
+      return {
+        id: r.id,
+        _id: r.id,
+        userId: r.userId,
+        userName: u?.name || r.candidateName || "Candidate",
+        userEmail: u?.email || "N/A",
+        fileName: r.fileName,
+        candidateName: r.candidateName || u?.name || "Candidate",
+        atsScore: r.atsScore || 0,
+        createdAt: r.createdAt,
+        summary: r.summary || "",
+      };
+    });
+
     return res.json({
       totalResumesAnalyzed: totalResumes,
       averageAtsScore: averageScore,
       topSkills,
       commonSkillGaps,
-      recentResumes: dbResumes.slice(0, 5),
+      resumes,
+      recentResumes: resumes.slice(0, 5),
     });
   } catch (err: any) {
     console.error("Resume analytics error:", err);
@@ -383,9 +576,13 @@ export const getResumeAnalytics = async (req: AuthRequest, res: Response) => {
 };
 
 // GET /api/admin/interviews
-export const getInterviewAnalytics = async (req: AuthRequest, res: Response) => {
+export const getInterviewAnalytics = async (_req: AuthRequest, res: Response) => {
   try {
-    const dbSessions = await InterviewSessionModel.findAll({ order: [["created_at", "DESC"]] });
+    const dbSessions = await InterviewSessionModel.findAll({
+      order: [["created_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(dbSessions);
 
     const totalInterviews = dbSessions.length;
     const completed = dbSessions.filter((s) => s.score > 0).length;
@@ -412,13 +609,31 @@ export const getInterviewAnalytics = async (req: AuthRequest, res: Response) => 
       .slice(0, 5)
       .map(([area, count]) => ({ area, count }));
 
+    const interviews = dbSessions.map((s: any) => {
+      const u = s.userId ? userMap.get(s.userId) : null;
+      return {
+        id: s.id,
+        _id: s.id,
+        userId: s.userId,
+        userName: u?.name || "Candidate",
+        userEmail: u?.email || "N/A",
+        role: s.role || "Software Developer",
+        interviewType: s.interviewType || "Mixed",
+        score: s.score || 0,
+        questionsCount: s.questionsCount || 5,
+        status: s.score > 0 ? "Completed" : "In Progress",
+        createdAt: s.createdAt,
+      };
+    });
+
     return res.json({
       totalInterviews,
       completedInterviews: completed,
       averageInterviewScore: avgScore,
       averageCommunicationScore: avgCommunication,
       commonWeakAreas: weakAreas,
-      recentSessions: dbSessions.slice(0, 6),
+      interviews,
+      recentSessions: interviews.slice(0, 6),
     });
   } catch (err: any) {
     console.error("Interview analytics error:", err);
@@ -427,9 +642,13 @@ export const getInterviewAnalytics = async (req: AuthRequest, res: Response) => 
 };
 
 // GET /api/admin/coding
-export const getCodingAnalytics = async (req: AuthRequest, res: Response) => {
+export const getCodingAnalytics = async (_req: AuthRequest, res: Response) => {
   try {
-    const dbAttempts = await CodingAttempt.findAll({ order: [["created_at", "DESC"]] });
+    const dbAttempts = await CodingAttempt.findAll({
+      order: [["created_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(dbAttempts);
 
     const totalSolved = dbAttempts.filter((r) => r.passed).length;
     const totalGenerated = dbAttempts.length;
@@ -455,6 +674,25 @@ export const getCodingAnalytics = async (req: AuthRequest, res: Response) => {
       .slice(0, 6)
       .map(([topic, count]) => ({ topic, count }));
 
+    const coding = dbAttempts.map((c: any) => {
+      const u = c.userId ? userMap.get(c.userId) : null;
+      return {
+        id: c.id,
+        _id: c.id,
+        userId: c.userId,
+        userName: u?.name || "Candidate",
+        userEmail: u?.email || "N/A",
+        problemTitle: c.problemTitle || "Coding Problem",
+        topic: c.topic || "Algorithms",
+        difficulty: c.difficulty || "Easy",
+        language: c.language || "JavaScript",
+        score: c.score || 0,
+        passed: c.passed,
+        result: c.passed ? "Accepted" : "Attempted",
+        createdAt: c.createdAt,
+      };
+    });
+
     return res.json({
       totalProblemsGenerated: totalGenerated,
       problemsSolved: totalSolved,
@@ -465,6 +703,7 @@ export const getCodingAnalytics = async (req: AuthRequest, res: Response) => {
         medium: difficultyCount.Medium || 0,
         hard: difficultyCount.Hard || 0,
       },
+      coding,
     });
   } catch (err: any) {
     console.error("Coding analytics error:", err);
@@ -473,17 +712,20 @@ export const getCodingAnalytics = async (req: AuthRequest, res: Response) => {
 };
 
 // GET /api/admin/roadmaps
-export const getRoadmapAnalytics = async (req: AuthRequest, res: Response) => {
+export const getRoadmapAnalytics = async (_req: AuthRequest, res: Response) => {
   try {
-    const dbRoadmaps = await Roadmap.findAll({ order: [["updated_at", "DESC"]] });
+    const dbRoadmaps = await Roadmap.findAll({
+      order: [["updated_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(dbRoadmaps);
 
     const roleCounts: Record<string, number> = {};
     let totalProgress = 0;
 
-    dbRoadmaps.forEach((r) => {
-      if (r.targetRole) {
-        roleCounts[r.targetRole] = (roleCounts[r.targetRole] || 0) + 1;
-      }
+    const roadmaps = dbRoadmaps.map((r: any) => {
+      const u = r.userId ? userMap.get(r.userId) : null;
+      let prog = 0;
       if (Array.isArray(r.phases)) {
         let comp = 0;
         let tot = 0;
@@ -492,8 +734,28 @@ export const getRoadmapAnalytics = async (req: AuthRequest, res: Response) => {
           tot += items.length;
           comp += items.filter((i: any) => i.completed).length;
         });
-        if (tot > 0) totalProgress += (comp / tot) * 100;
+        if (tot > 0) prog = Math.round((comp / tot) * 100);
       }
+      totalProgress += prog;
+
+      if (r.targetRole) {
+        roleCounts[r.targetRole] = (roleCounts[r.targetRole] || 0) + 1;
+      }
+
+      return {
+        id: r.id,
+        _id: r.id,
+        userId: r.userId,
+        userName: u?.name || "Candidate",
+        userEmail: u?.email || "N/A",
+        role: r.targetRole || "Software Developer",
+        targetRole: r.targetRole || "Software Developer",
+        skillLevel: r.skillLevel || "Beginner",
+        studyTime: r.studyTime || "1 hour",
+        progress: prog,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
     });
 
     const totalRoadmaps = dbRoadmaps.length;
@@ -506,8 +768,9 @@ export const getRoadmapAnalytics = async (req: AuthRequest, res: Response) => {
     return res.json({
       totalRoadmapsCreated: totalRoadmaps,
       averageCompletion: avgProgress,
-      mostPopularTargetRoles: popularRoles,
       averageRoadmapProgress: avgProgress,
+      mostPopularTargetRoles: popularRoles,
+      roadmaps,
     });
   } catch (err: any) {
     console.error("Roadmap analytics error:", err);
@@ -516,9 +779,14 @@ export const getRoadmapAnalytics = async (req: AuthRequest, res: Response) => {
 };
 
 // GET /api/admin/jobs
-export const getJobAnalytics = async (req: AuthRequest, res: Response) => {
+export const getJobAnalytics = async (_req: AuthRequest, res: Response) => {
   try {
-    const dbJobs = await JobActivity.findAll({ order: [["created_at", "DESC"]] });
+    const dbJobs = await JobActivity.findAll({
+      order: [["created_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(dbJobs);
+
     const savedJobsCount = dbJobs.filter((j) => j.isSaved).length;
 
     const locationCount: Record<string, number> = {};
@@ -534,15 +802,6 @@ export const getJobAnalytics = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // If few job searches yet, also aggregate locations from available platform listings
-    if (Object.keys(locationCount).length === 0) {
-      DEFAULT_JOBS.forEach((job) => {
-        const loc = job.location.split(",")[0].trim();
-        locationCount[loc] = (locationCount[loc] || 0) + 1;
-        roleCount[job.title] = (roleCount[job.title] || 0) + 1;
-      });
-    }
-
     const commonLocations = Object.entries(locationCount)
       .sort((a, b) => b[1] - a[1])
       .map(([location, count]) => ({ location, count }));
@@ -552,11 +811,30 @@ export const getJobAnalytics = async (req: AuthRequest, res: Response) => {
       .slice(0, 5)
       .map(([role, count]) => ({ role, count }));
 
+    const jobs = dbJobs.map((j: any) => {
+      const u = j.userId ? userMap.get(j.userId) : null;
+      return {
+        id: j.id,
+        _id: j.id,
+        userId: j.userId,
+        userName: u?.name || "Candidate",
+        userEmail: u?.email || "N/A",
+        jobId: j.jobId,
+        role: j.role || "Job Match",
+        company: j.company || "N/A",
+        location: j.location || "N/A",
+        matchScore: j.matchScore || 0,
+        isSaved: j.isSaved,
+        createdAt: j.createdAt,
+      };
+    });
+
     return res.json({
       totalJobSearches: dbJobs.length,
       savedJobs: savedJobsCount,
       mostSearchedRoles,
       mostCommonLocations: commonLocations,
+      jobs,
     });
   } catch (err: any) {
     console.error("Job analytics error:", err);
@@ -565,9 +843,13 @@ export const getJobAnalytics = async (req: AuthRequest, res: Response) => {
 };
 
 // GET /api/admin/github
-export const getGithubAnalytics = async (req: AuthRequest, res: Response) => {
+export const getGithubAnalytics = async (_req: AuthRequest, res: Response) => {
   try {
-    const dbGithub = await GithubAnalysisModel.findAll({ order: [["created_at", "DESC"]] });
+    const dbGithub = await GithubAnalysisModel.findAll({
+      order: [["created_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(dbGithub);
 
     let scoreSum = 0;
     const techCounts: Record<string, number> = {};
@@ -596,11 +878,28 @@ export const getGithubAnalytics = async (req: AuthRequest, res: Response) => {
       "Pin top production-ready full-stack projects to the user profile",
     ];
 
+    const github = dbGithub.map((g: any) => {
+      const u = g.userId ? userMap.get(g.userId) : null;
+      return {
+        id: g.id,
+        _id: g.id,
+        userId: g.userId,
+        userName: u?.name || "Candidate",
+        userEmail: u?.email || "N/A",
+        username: g.username || "N/A",
+        repositoriesCount: Array.isArray(g.repositories) ? g.repositories.length : 0,
+        overallScore: g.overallScore || 0,
+        result: "Completed",
+        createdAt: g.createdAt,
+      };
+    });
+
     return res.json({
       profilesAnalyzed: totalProfiles,
       averagePortfolioScore: avgScore,
       mostCommonTechnologies: commonTech,
       commonRecommendations: totalProfiles > 0 ? recommendations : [],
+      github,
     });
   } catch (err: any) {
     console.error("GitHub analytics error:", err);
@@ -611,25 +910,107 @@ export const getGithubAnalytics = async (req: AuthRequest, res: Response) => {
 // GET /api/admin/activity
 export const getPlatformActivity = async (req: AuthRequest, res: Response) => {
   try {
-    const page = Number(req.query.page || 1);
-    const limit = Number(req.query.limit || 20);
+    const page = Math.max(1, Number(req.query.page || 1));
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
     const offset = (page - 1) * limit;
+    const moduleFilter = String(req.query.module || "ALL").trim();
+
+    const where: any = {};
+    if (moduleFilter && moduleFilter.toUpperCase() !== "ALL") {
+      where.module = { [Op.iLike]: `%${moduleFilter}%` };
+    }
 
     const { count, rows } = await AdminActivity.findAndCountAll({
+      where,
       order: [["created_at", "DESC"]],
       limit,
       offset,
+    });
+
+    const userMap = await getUserMap(rows);
+
+    const formattedActivities = rows.map((item) => {
+      const u = item.userId ? userMap.get(item.userId) : null;
+      const userName = u?.name || item.userName || "User";
+      const userEmail = u?.email || item.userEmail || "N/A";
+      const result = item.result || (item.score !== null ? `${item.score}` : "Completed");
+
+      return {
+        id: item.id,
+        _id: item.id,
+        user: {
+          id: u?.id || item.userId,
+          _id: u?.id || item.userId,
+          name: userName,
+          email: userEmail,
+        },
+        userId: item.userId,
+        userName,
+        userEmail,
+        module: item.module,
+        action: item.action,
+        activity: item.action,
+        result,
+        score: item.score,
+        status: item.status || "Completed",
+        details: item.details,
+        createdAt: item.createdAt,
+      };
     });
 
     return res.json({
       total: count,
       page,
       limit,
-      activities: rows,
+      activities: formattedActivities,
     });
   } catch (err: any) {
     console.error("Activity log error:", err);
     return res.status(500).json({ message: "Failed to retrieve activity stream", error: err.message });
+  }
+};
+
+// GET /api/admin/activity/:userId
+export const getUserActivity = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = String(req.params.userId);
+    const activities = await AdminActivity.findAll({
+      where: { userId },
+      order: [["created_at", "DESC"]],
+    });
+
+    const userMap = await getUserMap(activities);
+
+    return res.json({
+      userId,
+      total: activities.length,
+      activities: activities.map((item) => {
+        const u = item.userId ? userMap.get(item.userId) : null;
+        return {
+          id: item.id,
+          _id: item.id,
+          user: {
+            id: u?.id || item.userId,
+            _id: u?.id || item.userId,
+            name: u?.name || item.userName,
+            email: u?.email || item.userEmail,
+          },
+          userName: u?.name || item.userName,
+          userEmail: u?.email || item.userEmail,
+          module: item.module,
+          action: item.action,
+          activity: item.action,
+          result: item.result || (item.score !== null ? `${item.score}` : "Completed"),
+          score: item.score,
+          status: item.status || "Completed",
+          details: item.details,
+          createdAt: item.createdAt,
+        };
+      }),
+    });
+  } catch (err: any) {
+    console.error("User activity error:", err);
+    return res.status(500).json({ message: "Failed to retrieve user activity", error: err.message });
   }
 };
 
@@ -656,7 +1037,7 @@ export const getPlatformSettings = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// POST /api/admin/settings
+// PUT /api/admin/settings
 export const updatePlatformSettings = async (req: AuthRequest, res: Response) => {
   try {
     const { platformName, supportEmail, maintenanceMode } = req.body;
@@ -668,8 +1049,11 @@ export const updatePlatformSettings = async (req: AuthRequest, res: Response) =>
     await logPlatformActivity({
       userId: req.userId,
       userName: req.user?.name || "Admin",
+      userEmail: req.user?.email,
       action: `Updated platform settings (Platform: ${platformSettings.platformName})`,
       module: "settings",
+      result: "Updated",
+      status: "Completed",
     });
 
     return res.json({
