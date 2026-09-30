@@ -9,24 +9,12 @@ import {
   Map,
   Mic,
   Target,
-  LogOut,
-  User as UserIcon,
   X,
-  Mail,
-  Award,
   ShieldCheck,
 } from "lucide-react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { api } from "../services/api";
-
-interface UserProfile {
-  id?: string;
-  name: string;
-  email: string;
-  role?: string;
-  targetRole?: string;
-  skills?: string[];
-}
+import { UserProfileModal, UserProfile, getInitials } from "./UserProfileModal";
 
 const links = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -42,11 +30,19 @@ const links = [
 interface SidebarProps {
   mobileOpen?: boolean;
   onClose?: () => void;
+  onOpenProfile?: () => void;
+  user?: UserProfile | null;
+  onUserUpdate?: (updatedUser: UserProfile) => void;
 }
 
-export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<UserProfile | null>(() => {
+export function Sidebar({
+  mobileOpen = false,
+  onClose,
+  onOpenProfile,
+  user: propUser,
+  onUserUpdate,
+}: SidebarProps) {
+  const [internalUser, setInternalUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem("user");
       return saved ? JSON.parse(saved) : null;
@@ -54,80 +50,47 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
       return null;
     }
   });
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editRole, setEditRole] = useState("");
-  const [savingProfile, setSavingProfile] = useState(false);
+  const [showInternalModal, setShowInternalModal] = useState(false);
 
-  // Close mobile drawer / modal on Escape key
+  const currentUser = propUser !== undefined ? propUser : internalUser;
+
+  // Close mobile drawer on Escape key if open
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (showProfileModal) {
-          setShowProfileModal(false);
-        } else if (mobileOpen && onClose) {
+        if (mobileOpen && onClose) {
           onClose();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mobileOpen, onClose, showProfileModal]);
-
-  const handleStartEdit = () => {
-    setEditName(user?.name || "");
-    setEditRole(user?.targetRole || "Software Developer");
-    setIsEditing(true);
-  };
-
-  const handleSaveProfile = async () => {
-    setSavingProfile(true);
-    try {
-      const res = await api.put("/auth/profile", {
-        name: editName,
-        targetRole: editRole,
-      });
-      if (res.data?.user) {
-        setUser(res.data.user);
-        localStorage.setItem("user", JSON.stringify(res.data.user));
-      }
-      setIsEditing(false);
-    } catch (e) {
-      console.error("Save profile error:", e);
-    } finally {
-      setSavingProfile(false);
-    }
-  };
+  }, [mobileOpen, onClose]);
 
   useEffect(() => {
-    // Fetch latest user profile from backend
-    api
-      .get("/auth/me")
-      .then((res) => {
-        if (res.data?.user) {
-          setUser(res.data.user);
-          localStorage.setItem("user", JSON.stringify(res.data.user));
-        }
-      })
-      .catch((err) => {
-        console.warn("Could not fetch user profile:", err);
-      });
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    navigate("/login");
-  };
-
-  const getInitials = (name?: string) => {
-    if (!name) return "U";
-    const parts = name.trim().split(" ");
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (propUser === undefined) {
+      // Fetch latest user profile from backend
+      api
+        .get("/auth/me")
+        .then((res) => {
+          if (res.data?.user) {
+            setInternalUser(res.data.user);
+            localStorage.setItem("user", JSON.stringify(res.data.user));
+          }
+        })
+        .catch((err) => {
+          console.warn("Could not fetch user profile:", err);
+        });
     }
-    return name.slice(0, 2).toUpperCase();
+  }, [propUser]);
+
+  const handleProfileClick = () => {
+    if (onClose) onClose();
+    if (onOpenProfile) {
+      onOpenProfile();
+    } else {
+      setShowInternalModal(true);
+    }
   };
 
   return (
@@ -177,7 +140,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         </nav>
 
         <div className="sidebar-bottom">
-          {user?.role === "ADMIN" && (
+          {currentUser?.role === "ADMIN" && (
             <NavLink
               to="/admin"
               className="admin-switch-btn"
@@ -205,182 +168,33 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
           {/* User Profile Card */}
           <div
             className="sidebar-user-card"
-            onClick={() => setShowProfileModal(true)}
+            onClick={handleProfileClick}
             title="View Profile Details & Log out"
+            role="button"
+            tabIndex={0}
           >
             <div className="user-avatar-circle">
-              {getInitials(user?.name)}
+              {getInitials(currentUser?.name)}
             </div>
             <div className="user-info-text">
-              <span className="user-name">{user?.name || "Career Seeker"}</span>
-              <span className="user-role">{user?.targetRole || user?.email || "Student / Developer"}</span>
+              <span className="user-name">{currentUser?.name || "Career Seeker"}</span>
+              <span className="user-role">{currentUser?.targetRole || currentUser?.email || "Student / Developer"}</span>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* Profile Details Modal */}
-      {showProfileModal && (
-        <div className="profile-modal-overlay" onClick={() => setShowProfileModal(false)}>
-          <div className="profile-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="profile-modal-header">
-              <h3>User Profile</h3>
-              <button
-                className="modal-close-btn"
-                onClick={() => setShowProfileModal(false)}
-                title="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="profile-modal-body">
-              <div className="profile-hero-section">
-                <div className="profile-avatar-large">
-                  {getInitials(user?.name)}
-                </div>
-                <div>
-                  <h4>{user?.name || "User"}</h4>
-                  <p className="profile-hero-role">{user?.targetRole || "Candidate"}</p>
-                </div>
-              </div>
-
-              <div className="profile-fields-list">
-                <div className="profile-field-item">
-                  <div className="field-icon">
-                    <UserIcon size={16} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <span className="field-label">Full Name</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        style={{
-                          background: "rgba(255,255,255,0.06)",
-                          border: "1px solid rgba(255,255,255,0.15)",
-                          borderRadius: "6px",
-                          padding: "4px 8px",
-                          color: "#fff",
-                          width: "100%",
-                          marginTop: "2px",
-                        }}
-                      />
-                    ) : (
-                      <span className="field-value">{user?.name || "Not specified"}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="profile-field-item">
-                  <div className="field-icon">
-                    <Mail size={16} />
-                  </div>
-                  <div>
-                    <span className="field-label">Email Address</span>
-                    <span className="field-value">{user?.email || "Not specified"}</span>
-                  </div>
-                </div>
-
-                <div className="profile-field-item">
-                  <div className="field-icon">
-                    <Award size={16} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <span className="field-label">Target Role</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editRole}
-                        onChange={(e) => setEditRole(e.target.value)}
-                        style={{
-                          background: "rgba(255,255,255,0.06)",
-                          border: "1px solid rgba(255,255,255,0.15)",
-                          borderRadius: "6px",
-                          padding: "4px 8px",
-                          color: "#fff",
-                          width: "100%",
-                          marginTop: "2px",
-                        }}
-                      />
-                    ) : (
-                      <span className="field-value">{user?.targetRole || "Software Developer"}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="profile-field-item">
-                  <div className="field-icon">
-                    <ShieldCheck size={16} />
-                  </div>
-                  <div>
-                    <span className="field-label">Account Status</span>
-                    <span className="field-value status-active">● Active Member</span>
-                  </div>
-                </div>
-              </div>
-
-              {user?.skills && user.skills.length > 0 && (
-                <div className="profile-skills-section">
-                  <span className="field-label">Declared Skills</span>
-                  <div className="profile-skills-chips">
-                    {user.skills.map((skill, i) => (
-                      <span key={i} className="skill-chip">
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="profile-modal-footer">
-              {isEditing ? (
-                <>
-                  <button
-                    className="modal-dismiss-btn"
-                    onClick={() => setIsEditing(false)}
-                    disabled={savingProfile}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="modal-logout-btn"
-                    style={{ background: "#10b981", borderColor: "#10b981", color: "#fff" }}
-                    onClick={handleSaveProfile}
-                    disabled={savingProfile}
-                  >
-                    {savingProfile ? "Saving..." : "Save Profile"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="modal-logout-btn"
-                    onClick={handleLogout}
-                  >
-                    <LogOut size={16} />
-                    Log out
-                  </button>
-                  <button
-                    className="modal-dismiss-btn"
-                    style={{ marginRight: "auto" }}
-                    onClick={handleStartEdit}
-                  >
-                    Edit Profile
-                  </button>
-                  <button
-                    className="modal-dismiss-btn"
-                    onClick={() => setShowProfileModal(false)}
-                  >
-                    Close
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* Fallback Profile Details Modal if not controlled by parent Layout */}
+      {!onOpenProfile && (
+        <UserProfileModal
+          isOpen={showInternalModal}
+          onClose={() => setShowInternalModal(false)}
+          user={currentUser}
+          onUserUpdate={(u) => {
+            setInternalUser(u);
+            if (onUserUpdate) onUserUpdate(u);
+          }}
+        />
       )}
     </>
   );

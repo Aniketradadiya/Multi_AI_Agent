@@ -2,9 +2,20 @@ import { useState, useEffect } from "react";
 import { Outlet, useLocation, NavLink } from "react-router-dom";
 import { Menu, Target } from "lucide-react";
 import { Sidebar } from "./Sidebar";
+import { UserProfileModal, UserProfile, getInitials } from "./UserProfileModal";
+import { api } from "../services/api";
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const u = localStorage.getItem("user");
+      return u ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  });
   const location = useLocation();
 
   // Close mobile drawer whenever user navigates to a new page
@@ -12,21 +23,30 @@ export function Layout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  const userInitial = (() => {
-    try {
-      const u = localStorage.getItem("user");
-      if (u) {
-        const parsed = JSON.parse(u);
-        if (parsed.name) {
-          const parts = parsed.name.trim().split(" ");
-          return parts.length >= 2
-            ? (parts[0][0] + parts[1][0]).toUpperCase()
-            : parsed.name.slice(0, 2).toUpperCase();
+  const fetchUserProfile = () => {
+    api
+      .get("/auth/me")
+      .then((res) => {
+        if (res.data?.user) {
+          setUser(res.data.user);
+          localStorage.setItem("user", JSON.stringify(res.data.user));
         }
-      }
-    } catch {}
-    return "U";
-  })();
+      })
+      .catch((err) => {
+        console.warn("Could not fetch user profile:", err);
+      });
+  };
+
+  // Fetch latest user details on mount
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
+
+  const handleOpenProfile = () => {
+    setMobileOpen(false);
+    fetchUserProfile();
+    setShowProfileModal(true);
+  };
 
   return (
     <div className="shell">
@@ -44,16 +64,24 @@ export function Layout() {
           <Target size={20} color="#42a977" />
           <span>Career Orbit</span>
         </NavLink>
-        <div
+        <button
+          type="button"
           className="mobile-avatar-btn"
-          onClick={() => setMobileOpen(true)}
-          title="Account / Menu"
+          onClick={handleOpenProfile}
+          aria-label="Open profile"
+          title="User Profile"
         >
-          {userInitial}
-        </div>
+          {getInitials(user?.name)}
+        </button>
       </header>
 
-      <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
+      <Sidebar
+        mobileOpen={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        onOpenProfile={handleOpenProfile}
+        user={user}
+        onUserUpdate={(updated) => setUser(updated)}
+      />
 
       <main>
         <header>
@@ -64,6 +92,14 @@ export function Layout() {
         </header>
         <Outlet />
       </main>
+
+      {/* Shared User Profile Modal for Desktop and Mobile */}
+      <UserProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        user={user}
+        onUserUpdate={(updated) => setUser(updated)}
+      />
     </div>
   );
 }

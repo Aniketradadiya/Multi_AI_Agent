@@ -504,18 +504,37 @@ input {
     color: #ffffff;
   }
   .mobile-avatar-btn {
-    width: 34px;
-    height: 34px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
     border-radius: 50%;
     background: linear-gradient(135deg, #2a946b 0%, #17573f 100%);
-    color: #fff;
+    color: #ffffff;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-family: inherit;
     font-size: 13px;
     font-weight: 700;
     cursor: pointer;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    padding: 0;
+    margin: 0;
+    outline: none;
+    position: relative;
+    z-index: 10;
+    pointer-events: auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    transition: transform 0.15s ease, filter 0.15s ease;
+  }
+  .mobile-avatar-btn:hover {
+    filter: brightness(1.08);
+  }
+  .mobile-avatar-btn:active {
+    transform: scale(0.94);
   }
 
   /* Slide-out Sidebar Drawer */
@@ -1125,20 +1144,26 @@ input {
   inset: 0;
   background: rgba(15, 26, 21, 0.65);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
   padding: 20px;
+  box-sizing: border-box;
 }
 .profile-modal-card {
   background: #ffffff;
-  width: 100%;
+  width: calc(100% - 2rem);
   max-width: 460px;
   border-radius: 14px;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   animation: modalPopIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  box-sizing: border-box;
 }
 @keyframes modalPopIn {
   from {
@@ -1185,6 +1210,9 @@ input {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  -webkit-overflow-scrolling: touch;
 }
 .profile-hero-section {
   display: flex;
@@ -1323,17 +1351,21 @@ input {
 }
 
 @media (max-width: 520px) {
+  .profile-modal-overlay {
+    padding: 12px;
+  }
   .profile-modal-card {
-    margin: 12px;
+    margin: 0;
+    width: 100%;
     max-width: calc(100vw - 24px);
     max-height: 90vh;
-    overflow-y: auto;
   }
   .profile-modal-header {
     padding: 16px 18px;
   }
   .profile-modal-body {
     padding: 16px 18px;
+    gap: 14px;
   }
   .profile-modal-footer {
     padding: 14px 16px;
@@ -1344,6 +1376,7 @@ input {
     flex: 1 1 auto;
     justify-content: center;
     text-align: center;
+    min-height: 40px;
   }
 }
 
